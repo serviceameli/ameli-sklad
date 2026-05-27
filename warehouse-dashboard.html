@@ -1,0 +1,968 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ameli Rental — Дашборд</title>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --black:#1A1A1A;--text:#2D2D2D;--mid:#555;--muted:#888;--light:#aaa;
+  --rule:#e0e0e0;--bg:#f5f5f3;--card:#fff;
+  --accent:#F5C518;--accent-dim:rgba(245,197,24,.1);
+  --client:#2ECC71;--yandex:#FF6B35;--our:#3D9BE9;
+  --day:#F5C518;--night:#6B7FFF;
+  --issued:#2ECC71;--pending:#F5C518;--overdue:#E74C3C;--ret:#3D9BE9;
+}
+body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+
+/* ── HEADER ── */
+.hdr{background:var(--black);padding:0 24px;height:54px;display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid var(--accent)}
+.hdr-logo{font-size:12px;font-weight:700;letter-spacing:.2em;text-transform:uppercase;color:#fff}
+.hdr-logo em{color:var(--accent);font-style:normal}
+.hdr-tag{font-size:10px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);background:rgba(255,255,255,.07);padding:4px 10px;border-radius:20px}
+
+/* ── TABS ── */
+.tabs{background:var(--card);border-bottom:1px solid var(--rule);display:flex;padding:0 16px;overflow-x:auto;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{padding:13px 14px;font-size:12px;font-weight:700;color:var(--muted);cursor:pointer;border-bottom:3px solid transparent;white-space:nowrap;flex-shrink:0;transition:all .15s}
+.tab.active{color:var(--black);border-color:var(--accent)}
+
+.main{max-width:1140px;margin:0 auto;padding:20px 16px}
+.tview{display:none}.tview.active{display:block}
+
+/* ── PERIOD BAR ── */
+.pbar{display:flex;align-items:center;gap:8px;margin-bottom:18px;flex-wrap:wrap}
+.plbl{font-size:10px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--light)}
+.pbtn{background:var(--card);border:2px solid var(--rule);border-radius:7px;padding:6px 12px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:600;color:var(--mid);cursor:pointer;transition:all .12s}
+.pbtn:hover{border-color:var(--accent)}
+.pbtn.active{background:var(--black);border-color:var(--black);color:#fff}
+.drange{display:flex;gap:6px;align-items:center;margin-left:auto}
+.drange input{border:2px solid var(--rule);border-radius:7px;padding:6px 9px;font-family:'Montserrat',sans-serif;font-size:12px;background:var(--card);color:var(--text)}
+.drange input:focus{outline:none;border-color:var(--accent)}
+
+/* ── REFRESH BAR ── */
+.rfbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:5px}
+.rfts{font-size:11px;color:var(--light);font-weight:500}
+.rfbtn{background:none;border:1px solid var(--rule);border-radius:7px;padding:5px 11px;font-family:'Montserrat',sans-serif;font-size:11px;font-weight:600;color:var(--mid);cursor:pointer}
+.rfbtn:hover{border-color:var(--accent)}
+
+/* ── SUMMARY CARDS ── */
+.sg{display:grid;gap:10px;margin-bottom:20px}
+.sg-4{grid-template-columns:repeat(4,1fr)}
+.sg-6{grid-template-columns:repeat(6,1fr)}
+.sg-3{grid-template-columns:repeat(3,1fr)}
+@media(max-width:720px){.sg-4,.sg-6{grid-template-columns:1fr 1fr}.sg-3{grid-template-columns:1fr 1fr}}
+.sc{background:var(--card);border-radius:12px;padding:14px 12px;border:1px solid var(--rule);position:relative;overflow:hidden}
+.sc::before{content:'';position:absolute;top:0;left:0;right:0;height:3px}
+.sc.acc::before{background:var(--accent)}.sc.dy::before{background:var(--day)}
+.sc.nt::before{background:var(--night)}.sc.bl::before{background:var(--our)}
+.sc.gr::before{background:var(--client)}.sc.or::before{background:var(--yandex)}
+.sc-lbl{font-size:9px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:var(--light);margin-bottom:5px}
+.sc-n{font-size:28px;font-weight:700;color:var(--black);line-height:1;margin-bottom:2px}
+.sc-s{font-size:10px;color:var(--muted);font-weight:500}
+
+/* ── SECTION HEADING ── */
+.sh{display:flex;align-items:flex-end;gap:10px;margin:20px 0 12px;padding-bottom:9px;border-bottom:1px solid var(--rule)}
+.sh-t{font-size:14px;font-weight:700;color:var(--black)}
+.sh-s{font-size:11px;color:var(--muted);padding-bottom:1px}
+
+/* ── CHART GRID ── */
+.cg2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px}
+.cg1{display:grid;grid-template-columns:1fr;gap:14px;margin-bottom:20px}
+@media(max-width:700px){.cg2{grid-template-columns:1fr}}
+.cc{background:var(--card);border-radius:12px;padding:16px 14px 12px;border:1px solid var(--rule)}
+.cc-t{font-size:12px;font-weight:700;color:var(--black);margin-bottom:2px}
+.cc-s{font-size:10px;color:var(--muted);margin-bottom:13px}
+.lgnd{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.li{display:flex;align-items:center;gap:4px;font-size:10px;font-weight:600;color:var(--mid)}
+.ld{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+
+/* ── HEATMAP ── */
+.heatmap-wrap{overflow-x:auto}
+.heatmap{border-collapse:collapse;width:100%;min-width:520px}
+.heatmap th{font-weight:700;color:var(--light);padding:3px 5px;text-align:center;font-size:9px;letter-spacing:.08em;text-transform:uppercase}
+.heatmap th.row-lbl{text-align:right;padding-right:8px;font-size:9px;color:var(--mid);font-family:'JetBrains Mono',monospace}
+.heatmap td{width:36px;height:32px;border-radius:4px;text-align:center;vertical-align:middle;font-size:10px;font-weight:700;cursor:default;transition:transform .1s}
+.heatmap td:hover{transform:scale(1.15);z-index:2;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+
+/* ── TABLES ── */
+.twrap{background:var(--card);border-radius:12px;border:1px solid var(--rule);overflow:hidden;margin-bottom:20px}
+.twrap.scroll{overflow-x:auto}
+table.dt{width:100%;border-collapse:collapse;min-width:600px}
+table.dt thead th{background:#fafafa;text-align:left;padding:9px 12px;font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--light);border-bottom:1px solid var(--rule);white-space:nowrap}
+table.dt tbody td{padding:9px 12px;font-size:12px;font-weight:500;border-bottom:1px solid #f5f5f5;color:var(--mid);vertical-align:middle}
+table.dt tbody td strong{color:var(--black);font-weight:700}
+table.dt tbody tr:last-child td{border-bottom:none}
+/* group headers */
+.tg-hdr td{background:var(--bg);font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding:7px 12px;border-bottom:1px solid var(--rule)}
+
+/* ── BADGES ── */
+.badge{display:inline-block;padding:3px 8px;border-radius:20px;font-size:10px;font-weight:700;white-space:nowrap}
+.badge.pending{background:rgba(245,197,24,.15);color:#a07800}
+.badge.issued{background:rgba(46,204,113,.15);color:#1a8a4a}
+.badge.returned{background:rgba(61,155,233,.15);color:#1a6fa0}
+.badge.overdue{background:rgba(231,76,60,.15);color:#c0392b}
+.badge.day{background:rgba(245,197,24,.12);color:#b89200}
+.badge.night{background:rgba(107,127,255,.12);color:#4455cc}
+.badge.client{background:rgba(46,204,113,.12);color:#1a8a4a}
+.badge.yandex{background:rgba(255,107,53,.12);color:#c0461a}
+.badge.our{background:rgba(61,155,233,.12);color:#1a6fa0}
+.badge.delivery{background:rgba(61,155,233,.12);color:#1a6fa0}
+.badge.self{background:rgba(46,204,113,.12);color:#1a8a4a}
+
+.onum{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;color:var(--black)}
+
+/* ── ORDERS SECTION LABEL ── */
+.orders-section-lbl{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding:8px 12px 4px;border-bottom:1px solid var(--rule);background:var(--bg)}
+
+/* ── ORDER FILTER BTNS ── */
+.ofilters{display:flex;align-items:center;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+.fbtn{background:var(--card);border:2px solid var(--rule);border-radius:7px;padding:5px 11px;font-family:'Montserrat',sans-serif;font-size:11px;font-weight:700;color:var(--mid);cursor:pointer;transition:all .12s}
+.fbtn.active{background:var(--black);border-color:var(--black);color:#fff}
+
+/* ── EXPORT BTN ── */
+.exp-btn{background:var(--black);color:#fff;border:none;border-radius:9px;padding:8px 16px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:600;cursor:pointer;display:inline-block;margin-bottom:12px}
+.exp-btn:hover{background:#333}
+
+/* ── INSIGHT CARD ── */
+.insight-card{background:var(--black);border-radius:12px;padding:16px 18px;margin-bottom:20px;color:#fff}
+.insight-title{font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+.insight-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+@media(max-width:600px){.insight-grid{grid-template-columns:1fr 1fr}}
+.insight-item{background:rgba(255,255,255,.06);border-radius:8px;padding:10px}
+.insight-num{font-size:20px;font-weight:700;line-height:1;margin-bottom:2px}
+.insight-lbl{font-size:9px;color:rgba(255,255,255,.45);font-weight:500}
+
+/* ── TIMESHEET ── */
+.ts-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-bottom:20px}
+.ts-card{background:var(--card);border-radius:12px;border:1px solid var(--rule);overflow:hidden}
+.ts-card-hdr{background:var(--black);padding:10px 14px;display:flex;align-items:center;justify-content:space-between}
+.ts-card-name{font-size:13px;font-weight:700;color:#fff}
+.ts-card-total{font-size:11px;color:var(--accent);font-weight:600}
+.ts-row{display:flex;justify-content:space-between;align-items:center;padding:7px 14px;border-bottom:1px solid #f5f5f5;font-size:12px}
+.ts-row:last-child{border-bottom:none}
+.ts-date{color:var(--muted);font-weight:500}
+.ts-hours{font-family:'JetBrains Mono',monospace;font-weight:700;color:var(--black)}
+.ts-night{font-size:10px;color:var(--night);font-weight:600;margin-left:6px}
+.ts-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-top:2px solid var(--rule)}
+.ts-sum-item{padding:8px;text-align:center;border-right:1px solid var(--rule)}
+.ts-sum-item:last-child{border-right:none}
+.ts-sum-n{font-size:16px;font-weight:700;color:var(--black);line-height:1}
+.ts-sum-l{font-size:8px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--light);margin-top:2px}
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <div class="hdr-logo">Ameli <em>Rental</em> · Дашборд</div>
+  <div class="hdr-tag">Только для руководителя</div>
+</div>
+
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('orders')">📦 Заказы сегодня</div>
+  <div class="tab" onclick="switchTab('schedule')">⏰ Нагрузка</div>
+  <div class="tab" onclick="switchTab('stats')">📊 Статистика</div>
+  <div class="tab" onclick="switchTab('workers')">🧑 Кладовщики</div>
+  <div class="tab" onclick="switchTab('timesheet')">🕐 Табель часов</div>
+  <div class="tab" onclick="switchTab('log')">📋 Журнал</div>
+</div>
+
+<div class="main">
+
+<!-- ══ ЗАКАЗЫ СЕГОДНЯ ══ -->
+<div class="tview active" id="tab-orders">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+    <div>
+      <div style="font-size:18px;font-weight:700;color:var(--black)">Заказы на сегодня</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:2px" id="todayDateLbl">—</div>
+    </div>
+    <button class="rfbtn" onclick="loadData()">↻ Обновить</button>
+  </div>
+  <!-- summary mini -->
+  <div class="sg sg-4" id="ordersSummary"></div>
+  <!-- tables -->
+  <div id="ordersContent"></div>
+</div>
+
+<!-- ══ НАГРУЗКА ══ -->
+<div class="tview" id="tab-schedule">
+  <div class="pbar">
+    <div class="plbl">Период:</div>
+    <button class="pbtn active" onclick="setPeriodH(30,this)">30 дней</button>
+    <button class="pbtn" onclick="setPeriodH(90,this)">3 мес.</button>
+    <button class="pbtn" onclick="setPeriodH(180,this)">6 мес.</button>
+    <button class="pbtn" onclick="setPeriodH(365,this)">Год</button>
+  </div>
+  <div class="insight-card">
+    <div class="insight-title">💡 Выводы для расписания</div>
+    <div class="insight-grid" id="insightGrid"></div>
+  </div>
+  <div class="sh"><div class="sh-t">🔥 Тепловая карта — час × день недели</div><div class="sh-s">визитов</div></div>
+  <div class="cc" style="margin-bottom:20px">
+    <div class="cc-t">Загрузка склада по времени</div>
+    <div class="cc-s">Красный = пиковый час. Данные по времени визита (МСК).</div>
+    <div class="heatmap-wrap" id="heatmapWrap"></div>
+  </div>
+  <div class="sh"><div class="sh-t">📊 По часам</div></div>
+  <div class="cg2">
+    <div class="cc">
+      <div class="cc-t">Визитов по часам</div>
+      <div class="cc-s">все дни периода</div>
+      <canvas id="chHourly" height="200"></canvas>
+    </div>
+    <div class="cc">
+      <div class="cc-t">Заказов по часам × тип</div>
+      <div class="cc-s">клиент / яндекс / наш курьер</div>
+      <canvas id="chHourlyType" height="200"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- ══ СТАТИСТИКА ══ -->
+<div class="tview" id="tab-stats">
+  <div class="pbar">
+    <div class="plbl">Период:</div>
+    <button class="pbtn" onclick="setPeriod(7,this)">7 дн.</button>
+    <button class="pbtn active" onclick="setPeriod(30,this)">30 дн.</button>
+    <button class="pbtn" onclick="setPeriod(90,this)">3 мес.</button>
+    <button class="pbtn" onclick="setPeriod(365,this)">Год</button>
+    <div class="drange">
+      <input type="date" id="dateFrom" onchange="renderStats()">
+      <span style="color:var(--light);font-size:11px">—</span>
+      <input type="date" id="dateTo" onchange="renderStats()">
+    </div>
+  </div>
+  <div class="rfbar">
+    <div class="rfts" id="rfts">—</div>
+    <button class="rfbtn" onclick="loadData()">↻</button>
+  </div>
+
+  <!-- визиты -->
+  <div class="sh"><div class="sh-t">👥 Визиты</div><div class="sh-s">один приезд = один визит</div></div>
+  <div class="sg sg-4">
+    <div class="sc acc"><div class="sc-lbl">Всего визитов</div><div class="sc-n" id="sv-total">—</div><div class="sc-s">за период</div></div>
+    <div class="sc dy"><div class="sc-lbl">Дневных</div><div class="sc-n" id="sv-day">—</div><div class="sc-s">☀️ 9:00–22:00</div></div>
+    <div class="sc nt"><div class="sc-lbl">Ночных</div><div class="sc-n" id="sv-night">—</div><div class="sc-s">🌙 22:00–9:00</div></div>
+    <div class="sc bl"><div class="sc-lbl">Кладовщиков</div><div class="sc-n" id="sv-workers">—</div><div class="sc-s">активных</div></div>
+  </div>
+
+  <!-- заказы -->
+  <div class="sh"><div class="sh-t">📦 Заказы</div><div class="sh-s">один визит может содержать несколько заказов</div></div>
+  <div class="sg sg-4">
+    <div class="sc acc"><div class="sc-lbl">Всего заказов</div><div class="sc-n" id="so-total">—</div><div class="sc-s">обработано</div></div>
+    <div class="sc gr"><div class="sc-lbl">Выдано</div><div class="sc-n" id="so-issued">—</div><div class="sc-s">выдача</div></div>
+    <div class="sc bl"><div class="sc-lbl">Возвращено</div><div class="sc-n" id="so-returned">—</div><div class="sc-s">возврат</div></div>
+    <div class="sc or"><div class="sc-lbl">Ср. заказов/визит</div><div class="sc-n" id="so-avg">—</div><div class="sc-s">коэффициент</div></div>
+  </div>
+
+  <div class="sh"><div class="sh-t">📅 Визиты по дням</div></div>
+  <div class="cg1">
+    <div class="cc">
+      <div class="cc-t">Визиты и заказы по дням</div>
+      <div class="cc-s">столбик = визитов, линия = заказов</div>
+      <canvas id="chTimeline" height="90"></canvas>
+      <div class="lgnd">
+        <div class="li"><div class="ld" style="background:var(--day)"></div>Визитов (день)</div>
+        <div class="li"><div class="ld" style="background:var(--night)"></div>Визитов (ночь)</div>
+        <div class="li"><div class="ld" style="background:var(--client);border-radius:2px;width:14px;height:3px"></div>Заказов</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sh"><div class="sh-t">📆 По дням недели</div></div>
+  <div class="cg2">
+    <div class="cc">
+      <div class="cc-t">Нагрузка по дням недели</div>
+      <div class="cc-s">среднее визитов</div>
+      <canvas id="chWeekday" height="180"></canvas>
+    </div>
+    <div class="cc">
+      <div class="cc-t">День / Ночь по дням недели</div>
+      <div class="cc-s"></div>
+      <canvas id="chWkDN" height="180"></canvas>
+    </div>
+  </div>
+
+  <div class="sh"><div class="sh-t">📅 По месяцам</div></div>
+  <div class="cg1">
+    <div class="cc">
+      <div class="cc-t">Визиты и заказы по месяцам</div>
+      <div class="cc-s">клиент / яндекс / наш курьер</div>
+      <canvas id="chMonthly" height="90"></canvas>
+      <div class="lgnd">
+        <div class="li"><div class="ld" style="background:var(--client)"></div>Клиент</div>
+        <div class="li"><div class="ld" style="background:var(--yandex)"></div>Яндекс</div>
+        <div class="li"><div class="ld" style="background:var(--our)"></div>Наш курьер</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sh"><div class="sh-t">👥 Тип посетителей</div></div>
+  <div class="cg2">
+    <div class="cc">
+      <div class="cc-t">Визиты по типу</div>
+      <div class="cc-s">доля</div>
+      <canvas id="chPie" height="200"></canvas>
+      <div class="lgnd" id="pieLgnd"></div>
+    </div>
+    <div class="cc">
+      <div class="cc-t">Тип × День/Ночь</div>
+      <div class="cc-s"></div>
+      <canvas id="chDNType" height="200"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- ══ КЛАДОВЩИКИ ══ -->
+<div class="tview" id="tab-workers">
+  <div class="pbar" style="margin-top:2px">
+    <div class="plbl">Период:</div>
+    <button class="pbtn active" onclick="setPeriodW(30,this)">30 дн.</button>
+    <button class="pbtn" onclick="setPeriodW(90,this)">3 мес.</button>
+    <button class="pbtn" onclick="setPeriodW(365,this)">Год</button>
+  </div>
+
+  <!-- per-worker cards -->
+  <div id="workerCards"></div>
+</div>
+
+<!-- ══ ТАБЕЛЬ ЧАСОВ ══ -->
+<div class="tview" id="tab-timesheet">
+  <div class="pbar" style="margin-top:2px">
+    <div class="plbl">Период:</div>
+    <button class="pbtn" onclick="setPeriodTS(7,this)">7 дн.</button>
+    <button class="pbtn active" onclick="setPeriodTS(30,this)">30 дн.</button>
+    <button class="pbtn" onclick="setPeriodTS(90,this)">3 мес.</button>
+  </div>
+  <button class="exp-btn" onclick="exportTimesheet()">⬇ Скачать CSV</button>
+  <div class="ts-grid" id="tsGrid"></div>
+</div>
+
+<!-- ══ ЖУРНАЛ ══ -->
+<div class="tview" id="tab-log">
+  <div class="pbar" style="margin-top:2px">
+    <div class="plbl">Период:</div>
+    <button class="pbtn active" onclick="setPeriodL(7,this)">7 дн.</button>
+    <button class="pbtn" onclick="setPeriodL(30,this)">30 дн.</button>
+    <button class="pbtn" onclick="setPeriodL(90,this)">3 мес.</button>
+  </div>
+  <button class="exp-btn" onclick="exportCSV()">⬇ Скачать CSV</button>
+  <div class="twrap scroll">
+    <table class="dt">
+      <thead><tr>
+        <th>Дата</th><th>Время визита</th><th>Сутки</th><th>Кладовщик</th>
+        <th>Кто</th><th>Операция</th><th>Заказы</th><th>Кол-во</th><th>Комментарий</th>
+      </tr></thead>
+      <tbody id="logTbody"></tbody>
+    </table>
+  </div>
+</div>
+
+</div><!-- /main -->
+
+<script src="config.js"></script>
+<script>
+// ═══════════════
+// URL берётся из файла config.js (лежит рядом с этим файлом)
+const MSK_OFFSET = 3; // UTC+3 Moscow
+// ═══════════════
+
+const MONTHS = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
+const DAYS   = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+const VIS    = {client:'Клиент',yandex:'Яндекс',our:'Наш курьер'};
+const OPL    = {issue:'Выдача',return:'Возврат',pickup:'Получение',dropoff:'Возврат',both:'Получ.+Возврат'};
+
+let allShifts=[], allVisits=[], todayOrders=[];
+let statsPeriod=30, wPeriod=30, tsPeriod=30, logPeriod=7, hPeriod=30;
+let charts={};
+
+// Moscow time helpers
+function mskNow(){ return new Date(Date.now() + MSK_OFFSET*3600000); }
+function fmtMsk(d){ return d.toISOString().split('T')[0]; } // YYYY-MM-DD in MSK
+function todayMsk(){ return fmtMsk(mskNow()); }
+function parseMskHour(timeStr){
+  if(!timeStr) return null;
+  const m=timeStr.match(/(\d{1,2})[:h]/);
+  return m?parseInt(m[1]):null;
+}
+function isNightHour(h){ return h!=null && (h>=22 || h<9); }
+
+document.addEventListener('DOMContentLoaded',()=>{
+  const today = new Date();
+  document.getElementById('dateTo').value   = fmtMsk(new Date(today.getTime()+MSK_OFFSET*3600000));
+  const from = new Date(today.getTime()+MSK_OFFSET*3600000); from.setDate(from.getDate()-29);
+  document.getElementById('dateFrom').value = fmtMsk(from);
+  document.getElementById('todayDateLbl').textContent =
+    new Date().toLocaleDateString('ru',{weekday:'long',day:'numeric',month:'long',timeZone:'Europe/Moscow'});
+  loadData();
+});
+
+function fmt(d){ return d instanceof Date ? d.toISOString().split('T')[0] : d; }
+
+async function loadData(){
+  if(document.getElementById('rfts')) document.getElementById('rfts').textContent='Загрузка...';
+  const local = JSON.parse(localStorage.getItem('wh_shifts')||'[]');
+  if(SCRIPT_URL.includes('YOUR_')){
+    allShifts  = local.length ? local : genDemoShifts();
+    todayOrders= genDemoOrders();
+  } else {
+    try{
+      const r=await fetch(SCRIPT_URL+'?action=getAll');
+      const j=await r.json();
+      allShifts  = j.shifts||local;
+      todayOrders= j.orders||[];
+    }catch(e){ allShifts=local; todayOrders=[]; }
+  }
+
+  // Flatten: one record per VISIT (with all orders inside)
+  allVisits=[];
+  allShifts.forEach(s=>{
+    (s.entries||[]).forEach(e=>{
+      const hour = parseMskHour(e.time||'');
+      allVisits.push({
+        ...e,
+        worker:    s.worker,
+        shiftDate: s.shiftDate,
+        shiftStart:s.shiftStart,
+        shiftEnd:  s.shiftEnd,
+        shiftIsNight: s.isNight,
+        ts:        e.timestamp||s.shiftStart||new Date().toISOString(),
+        hour,
+        isNight:   e.night==='Ночь' || isNightHour(hour),
+        // Normalise orders array
+        ordersArr: e.orders?.length ? e.orders : (e.orderId ? [{id:e.orderId,client:e.orderClient||'',returnDate:e.orderReturnDate||'',delivery:e.orderDelivery||''}] : []),
+      });
+    });
+  });
+
+  if(document.getElementById('rfts'))
+    document.getElementById('rfts').textContent='Обновлено '+new Date().toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit',timeZone:'Europe/Moscow'})+' МСК';
+
+  renderAll();
+}
+
+function renderAll(){
+  renderOrders();
+  renderSchedule();
+  renderStats();
+  renderWorkers();
+  renderTimesheet();
+  renderLog();
+}
+
+// ══════════════════════════════════════════
+// TAB SWITCH
+// ══════════════════════════════════════════
+function switchTab(t){
+  const keys=['orders','schedule','stats','workers','timesheet','log'];
+  document.querySelectorAll('.tab').forEach((el,i)=>el.classList.toggle('active',keys[i]===t));
+  document.querySelectorAll('.tview').forEach(v=>v.classList.remove('active'));
+  document.getElementById('tab-'+t).classList.add('active');
+}
+
+// ══════════════════════════════════════════
+// ORDERS TODAY
+// ══════════════════════════════════════════
+function getOrderStatuses(){
+  const todayStr = todayMsk();
+  const issued=new Set(), returned=new Set();
+  allVisits.forEach(v=>{
+    if(!v.ts) return;
+    const d = v.ts.split('T')[0];
+    if(d!==todayStr) return;
+    v.ordersArr.forEach(o=>{
+      if(!o.id||o.id==='__other__') return;
+      if(['issue','pickup'].includes(v.operation)) issued.add(o.id);
+      if(['return','dropoff','both'].includes(v.operation)) returned.add(o.id);
+    });
+  });
+  return {issued,returned};
+}
+
+function renderOrders(){
+  const {issued,returned} = getOrderStatuses();
+  const toIssue  = todayOrders.filter(o=>o.type==='issue');
+  const toReturn = todayOrders.filter(o=>o.type==='return');
+
+  const statusOf = o => {
+    if(issued.has(o.id))   return 'issued';
+    if(returned.has(o.id)) return 'returned';
+    return 'pending';
+  };
+
+  // Summary
+  let pI=0,iI=0,pR=0,rR=0;
+  toIssue.forEach(o=>{ const s=statusOf(o); if(s==='issued')iI++; else pI++; });
+  toReturn.forEach(o=>{ const s=statusOf(o); if(s==='returned')rR++; else pR++; });
+  document.getElementById('ordersSummary').innerHTML=`
+    <div class="sc acc"><div class="sc-lbl">К выдаче — ожидают</div><div class="sc-n">${pI}</div><div class="sc-s">из ${toIssue.length}</div></div>
+    <div class="sc gr"><div class="sc-lbl">Выдано сегодня</div><div class="sc-n">${iI}</div><div class="sc-s">✓</div></div>
+    <div class="sc bl"><div class="sc-lbl">К возврату — ожидают</div><div class="sc-n">${pR}</div><div class="sc-s">из ${toReturn.length}</div></div>
+    <div class="sc gr"><div class="sc-lbl">Возвращено сегодня</div><div class="sc-n">${rR}</div><div class="sc-s">✓</div></div>`;
+
+  // Pending first, done last
+  const rowOf = (o,typeLabel) => {
+    const s = statusOf(o);
+    const done = s==='issued'||s==='returned';
+    const dateRange = [o.issueDate,o.returnDate].filter(Boolean).join(' → ');
+    const delivBadge = o.delivery?.includes('Наш')
+      ? `<span class="badge delivery">🚛 Наша</span>`
+      : `<span class="badge self">🚶 Самовывоз</span>`;
+    const statusBadge = s==='issued'
+      ? `<span class="badge issued">✓ Выдан</span>`
+      : s==='returned'
+      ? `<span class="badge returned">✓ Возвращён</span>`
+      : typeLabel==='issue'
+      ? `<span class="badge pending">⏳ Ожидает</span>`
+      : `<span class="badge" style="background:rgba(61,155,233,.15);color:#1a6fa0">🔄 Ожидает</span>`;
+    const timeInfo = o.issueTime||o.returnTime ? `<br><span style="font-size:10px;color:var(--muted)">${o.issueTime||o.returnTime}</span>` : '';
+    return {done, html:`<tr>
+      <td>${statusBadge}</td>
+      <td><span class="onum">${o.id}</span></td>
+      <td><strong>${o.client||'—'}</strong>${o.company?`<br><span style="font-size:10px;color:var(--muted)">${o.company}</span>`:''}</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:11px">${dateRange}${timeInfo}</td>
+      <td>${delivBadge}</td>
+      <td>${o.worker?`<span style="font-size:11px;font-weight:600;color:var(--mid)">${o.worker}</span>`:'—'}</td>
+    </tr>`};
+  };
+
+  const buildSection = (orders, typeLabel, title) => {
+    if(!orders.length) return '';
+    const rows = orders.map(o=>rowOf(o,typeLabel));
+    const pending = rows.filter(r=>!r.done);
+    const done    = rows.filter(r=>r.done);
+    let html = `<div class="orders-section-lbl">${title} (${orders.length})</div>
+    <table class="dt"><thead><tr>
+      <th>Статус</th><th>Заказ</th><th>Клиент</th><th>Даты аренды</th><th>Доставка</th><th>Работник</th>
+    </tr></thead><tbody>`;
+    pending.forEach(r=>html+=r.html);
+    if(done.length){
+      html+=`<tr class="tg-hdr"><td colspan="6">✓ Выдано / Возвращено (${done.length})</td></tr>`;
+      done.forEach(r=>html+=r.html);
+    }
+    html+='</tbody></table>';
+    return html;
+  };
+
+  document.getElementById('ordersContent').innerHTML =
+    `<div class="twrap scroll">` +
+    buildSection(toIssue,'issue','📦 К выдаче сегодня') +
+    buildSection(toReturn,'return','🔄 К возврату сегодня') +
+    `</div>`;
+}
+
+// ══════════════════════════════════════════
+// SCHEDULE / HEATMAP
+// ══════════════════════════════════════════
+function setPeriodH(d,el){ hPeriod=d; document.querySelectorAll('#tab-schedule .pbtn').forEach(b=>b.classList.remove('active')); el.classList.add('active'); renderSchedule(); }
+
+function getHeatVisits(){
+  const cutoff=new Date(Date.now()-hPeriod*864e5);
+  return allVisits.filter(v=>new Date(v.ts)>=cutoff && v.hour!=null);
+}
+
+function renderSchedule(){
+  const data=getHeatVisits();
+  renderInsights(data);
+  renderHeatmap(data);
+  renderHourlyCharts(data);
+}
+
+function renderInsights(data){
+  if(!data.length){ document.getElementById('insightGrid').innerHTML='<div style="color:rgba(255,255,255,.4);grid-column:1/-1">Недостаточно данных</div>'; return; }
+  const hc=Array(24).fill(0); data.forEach(v=>hc[v.hour]++);
+  const pH=hc.indexOf(Math.max(...hc));
+  const wh=hc.slice(9,22); const qH=wh.indexOf(Math.min(...wh.filter(v=>v>0)))+9;
+  const dc=Array(7).fill(0); data.forEach(v=>dc[new Date(v.ts).getDay()]++);
+  const pD=dc.indexOf(Math.max(...dc));
+  const nightPct=Math.round(data.filter(v=>v.isNight).length/data.length*100);
+  // orders
+  const totalOrders=data.reduce((s,v)=>s+(v.ordersArr?.filter(o=>o.id&&o.id!=='__other__').length||0),0);
+  const avgOrd=data.length?Math.round(totalOrders/data.length*10)/10:0;
+  document.getElementById('insightGrid').innerHTML=`
+    <div class="insight-item"><div class="insight-num" style="color:var(--accent)">${String(pH).padStart(2,'0')}:00</div><div class="insight-lbl">Пиковый час</div></div>
+    <div class="insight-item"><div class="insight-num" style="color:#8899ff">${DAYS[pD]}</div><div class="insight-lbl">Загруженный день</div></div>
+    <div class="insight-item"><div class="insight-num" style="color:#2ECC71">${String(qH).padStart(2,'0')}:00</div><div class="insight-lbl">Тихий час</div></div>
+    <div class="insight-item"><div class="insight-num">${nightPct}%</div><div class="insight-lbl">Ночных визитов</div></div>
+    <div class="insight-item"><div class="insight-num">${data.length}</div><div class="insight-lbl">Визитов за период</div></div>
+    <div class="insight-item"><div class="insight-num">${avgOrd}</div><div class="insight-lbl">Заказов на визит</div></div>`;
+}
+
+function renderHeatmap(data){
+  const HOURS=Array.from({length:16},(_,i)=>i+8);
+  const grid=Array(7).fill(null).map(()=>Array(24).fill(0));
+  const dc=Array(7).fill(0);
+  data.forEach(v=>{ const wd=new Date(v.ts).getDay(); if(v.hour>=8&&v.hour<=23){ grid[wd][v.hour]++; } dc[wd]++; });
+  const norm=grid.map((row,wd)=>row.map(c=>dc[wd]?c/dc[wd]*100:0));
+  const mx=Math.max(...norm.flat());
+  const color=v=>{ if(!v)return{bg:'#f5f5f3',c:'#ddd'}; const r=v/mx; if(r>=.85)return{bg:'#E74C3C',c:'#fff'}; if(r>=.6)return{bg:'#FF6B35',c:'#fff'}; if(r>=.35)return{bg:'#F5C518',c:'#333'}; if(r>=.15)return{bg:'rgba(245,197,24,.35)',c:'#555'}; return{bg:'rgba(245,197,24,.1)',c:'#aaa'}; };
+  let html=`<table class="heatmap"><thead><tr><th class="row-lbl"></th>`;
+  HOURS.forEach(h=>html+=`<th>${String(h).padStart(2,'0')}</th>`);
+  html+=`</tr></thead><tbody>`;
+  DAYS.forEach((day,wd)=>{
+    html+=`<tr><th class="row-lbl">${day}</th>`;
+    HOURS.forEach(h=>{ const{bg,c}=color(norm[wd][h]); html+=`<td style="background:${bg};color:${c}" title="${day} ${String(h).padStart(2,'0')}:00 · ${grid[wd][h]} визитов">${grid[wd][h]||''}</td>`; });
+    html+=`</tr>`;
+  });
+  html+=`</tbody></table>`;
+  document.getElementById('heatmapWrap').innerHTML=html;
+}
+
+function renderHourlyCharts(data){
+  const H=Array.from({length:16},(_,i)=>i+8);
+  const tot=Array(24).fill(0),bT={client:Array(24).fill(0),yandex:Array(24).fill(0),our:Array(24).fill(0)};
+  data.forEach(v=>{ if(v.hour>=8&&v.hour<=23){ tot[v.hour]++; if(bT[v.visitor]) bT[v.visitor][v.hour]++; } });
+  const lbls=H.map(h=>`${String(h).padStart(2,'0')}:00`);
+  dc('chHourly');
+  charts['chHourly']=new Chart(document.getElementById('chHourly'),{type:'bar',data:{labels:lbls,datasets:[{data:H.map(h=>tot[h]),backgroundColor:H.map(h=>tot[h]===Math.max(...H.map(hh=>tot[hh]))?'rgba(231,76,60,.85)':'rgba(245,197,24,.75)'),borderRadius:3}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{font:{family:'Montserrat',size:9},maxRotation:45}},y:{grid:{color:'#f0f0f0'},ticks:{font:{family:'Montserrat',size:10}},beginAtZero:true}}}});
+  dc('chHourlyType');
+  charts['chHourlyType']=new Chart(document.getElementById('chHourlyType'),{type:'bar',data:{labels:lbls,datasets:[{label:'Клиент',data:H.map(h=>bT.client[h]),backgroundColor:'rgba(46,204,113,.8)',borderRadius:2},{label:'Яндекс',data:H.map(h=>bT.yandex[h]),backgroundColor:'rgba(255,107,53,.8)',borderRadius:2},{label:'Наш',data:H.map(h=>bT.our[h]),backgroundColor:'rgba(61,155,233,.8)',borderRadius:2}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{x:{stacked:true,grid:{display:false},ticks:{font:{family:'Montserrat',size:9},maxRotation:45}},y:{stacked:true,grid:{color:'#f0f0f0'},ticks:{font:{family:'Montserrat',size:10}},beginAtZero:true}}}});
+}
+
+// ══════════════════════════════════════════
+// STATS
+// ══════════════════════════════════════════
+function setPeriod(d,el){
+  statsPeriod=d;
+  document.querySelectorAll('#tab-stats .pbtn').forEach(b=>b.classList.remove('active')); el.classList.add('active');
+  const to=new Date(), fr=new Date(); fr.setDate(fr.getDate()-d+1);
+  document.getElementById('dateFrom').value=fmt(fr); document.getElementById('dateTo').value=fmt(to);
+  renderStats();
+}
+
+function getStatVisits(){
+  const fr=document.getElementById('dateFrom').value, to=document.getElementById('dateTo').value;
+  return allVisits.filter(v=>{ const d=v.ts?.split('T')[0]||''; return d>=fr&&d<=to; });
+}
+
+function renderStats(){
+  const data=getStatVisits();
+  // visits
+  document.getElementById('sv-total').textContent=data.length;
+  document.getElementById('sv-day').textContent=data.filter(v=>!v.isNight).length;
+  document.getElementById('sv-night').textContent=data.filter(v=>v.isNight).length;
+  document.getElementById('sv-workers').textContent=new Set(data.map(v=>v.worker)).size;
+  // orders
+  const allOrds=data.flatMap(v=>v.ordersArr.filter(o=>o.id&&o.id!=='__other__'));
+  const issuedO=data.filter(v=>['issue','pickup'].includes(v.operation)).flatMap(v=>v.ordersArr.filter(o=>o.id&&o.id!=='__other__'));
+  const returnO=data.filter(v=>['return','dropoff','both'].includes(v.operation)).flatMap(v=>v.ordersArr.filter(o=>o.id&&o.id!=='__other__'));
+  document.getElementById('so-total').textContent=allOrds.length;
+  document.getElementById('so-issued').textContent=issuedO.length;
+  document.getElementById('so-returned').textContent=returnO.length;
+  document.getElementById('so-avg').textContent=data.length?(Math.round(allOrds.length/data.length*10)/10):0;
+
+  renderTimeline(data); renderWeekday(data); renderMonthly(data); renderPie(data); renderDNType(data);
+  if(document.getElementById('rfts')) document.getElementById('rfts').textContent='Обновлено '+new Date().toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit',timeZone:'Europe/Moscow'})+' МСК';
+}
+
+function dateLabels(){
+  const fr=new Date(document.getElementById('dateFrom').value), to=new Date(document.getElementById('dateTo').value);
+  const lbls=[]; const c=new Date(fr);
+  while(c<=to){ lbls.push(fmt(c)); c.setDate(c.getDate()+1); }
+  if(lbls.length>60) return lbls.filter((_,i)=>i%7===0);
+  return lbls;
+}
+
+function renderTimeline(data){
+  const lbls=dateLabels();
+  const dayA=[],nightA=[],ordA=[];
+  lbls.forEach(l=>{
+    const vs=data.filter(v=>(v.ts?.split('T')[0]||v.shiftDate)===l);
+    dayA.push(vs.filter(v=>!v.isNight).length);
+    nightA.push(vs.filter(v=>v.isNight).length);
+    ordA.push(vs.reduce((s,v)=>s+v.ordersArr.filter(o=>o.id&&o.id!=='__other__').length,0));
+  });
+  const fl=lbls.map(l=>new Date(l).toLocaleDateString('ru',{day:'numeric',month:'short'}));
+  dc('chTimeline');
+  charts['chTimeline']=new Chart(document.getElementById('chTimeline'),{type:'bar',data:{labels:fl,datasets:[
+    {label:'Визитов (день)',data:dayA,backgroundColor:'rgba(245,197,24,.75)',borderRadius:2,stack:'v'},
+    {label:'Визитов (ночь)',data:nightA,backgroundColor:'rgba(107,127,255,.75)',borderRadius:2,stack:'v'},
+    {label:'Заказов',data:ordA,type:'line',borderColor:'rgba(46,204,113,1)',backgroundColor:'rgba(46,204,113,.15)',tension:.3,pointRadius:2,yAxisID:'y2'},
+  ]},options:{responsive:true,plugins:{legend:{display:false}},scales:{x:{stacked:true,grid:{display:false},ticks:{font:{family:'Montserrat',size:9},maxRotation:45}},y:{stacked:true,grid:{color:'#f0f0f0'},ticks:{font:{family:'Montserrat',size:10}},beginAtZero:true},y2:{position:'right',grid:{display:false},ticks:{font:{family:'Montserrat',size:9}},beginAtZero:true}}}});
+}
+
+function renderWeekday(data){
+  const vc=Array(7).fill(0),dn=Array(7).fill(0),nn=Array(7).fill(0),dc2=Array(7).fill(0);
+  data.forEach(v=>{ const wd=new Date(v.ts||v.shiftTs||new Date()).getDay(); vc[wd]++; if(!v.isNight)dn[wd]++; else nn[wd]++; });
+  const fr=new Date(document.getElementById('dateFrom').value), to=new Date(document.getElementById('dateTo').value);
+  const c=new Date(fr); while(c<=to){ dc2[c.getDay()]++; c.setDate(c.getDate()+1); }
+  const avg=vc.map((v,i)=>dc2[i]?+(v/dc2[i]).toFixed(1):0);
+  dc('chWeekday');
+  charts['chWeekday']=new Chart(document.getElementById('chWeekday'),{type:'bar',data:{labels:DAYS,datasets:[{data:avg,backgroundColor:['rgba(255,107,53,.8)','rgba(61,155,233,.8)','rgba(61,155,233,.8)','rgba(61,155,233,.8)','rgba(61,155,233,.8)','rgba(46,204,113,.8)','rgba(255,107,53,.8)'],borderRadius:5}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{font:{family:'Montserrat',size:11}}},y:{grid:{color:'#f0f0f0'},ticks:{font:{family:'Montserrat',size:10}},beginAtZero:true}}}});
+  dc('chWkDN');
+  charts['chWkDN']=new Chart(document.getElementById('chWkDN'),{type:'bar',data:{labels:DAYS,datasets:[{label:'День',data:dn,backgroundColor:'rgba(245,197,24,.8)',borderRadius:4},{label:'Ночь',data:nn,backgroundColor:'rgba(107,127,255,.8)',borderRadius:4}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{font:{family:'Montserrat',size:11}}},y:{grid:{color:'#f0f0f0'},ticks:{font:{family:'Montserrat',size:10}},beginAtZero:true}}}});
+}
+
+function renderMonthly(data){
+  const m={};
+  data.forEach(v=>{ const d=new Date(v.ts||v.shiftTs||new Date()); const k=`${d.getFullYear()}-${String(d.getMonth()).padStart(2,'0')}`; if(!m[k])m[k]={c:0,y:0,o:0,lbl:MONTHS[d.getMonth()]+' '+(d.getFullYear()%100)}; if(v.visitor==='client')m[k].c++; else if(v.visitor==='yandex')m[k].y++; else if(v.visitor==='our')m[k].o++; });
+  const s=Object.entries(m).sort((a,b)=>a[0]>b[0]?1:-1);
+  dc('chMonthly');
+  charts['chMonthly']=new Chart(document.getElementById('chMonthly'),{type:'bar',data:{labels:s.map(([,v])=>v.lbl),datasets:[{label:'Клиент',data:s.map(([,v])=>v.c),backgroundColor:'rgba(46,204,113,.8)',borderRadius:2},{label:'Яндекс',data:s.map(([,v])=>v.y),backgroundColor:'rgba(255,107,53,.8)',borderRadius:2},{label:'Наш',data:s.map(([,v])=>v.o),backgroundColor:'rgba(61,155,233,.8)',borderRadius:2}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{x:{stacked:true,grid:{display:false},ticks:{font:{family:'Montserrat',size:10}}},y:{stacked:true,grid:{color:'#f0f0f0'},ticks:{font:{family:'Montserrat',size:10}},beginAtZero:true}}}});
+}
+
+function renderPie(data){
+  const c=data.filter(v=>v.visitor==='client').length, y=data.filter(v=>v.visitor==='yandex').length, o=data.filter(v=>v.visitor==='our').length, t=c+y+o||1;
+  dc('chPie');
+  charts['chPie']=new Chart(document.getElementById('chPie'),{type:'doughnut',data:{labels:['Клиент','Яндекс','Наш'],datasets:[{data:[c,y,o],backgroundColor:['rgba(46,204,113,.85)','rgba(255,107,53,.85)','rgba(61,155,233,.85)'],borderWidth:2,borderColor:'#fff'}]},options:{cutout:'65%',responsive:true,plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>`${ctx.label}: ${ctx.raw} (${Math.round(ctx.raw/t*100)}%)`}}}}});
+  document.getElementById('pieLgnd').innerHTML=`<div class="li"><div class="ld" style="background:var(--client)"></div>Клиент: <b style="color:var(--black);margin-left:3px">${c}</b></div><div class="li"><div class="ld" style="background:var(--yandex)"></div>Яндекс: <b style="color:var(--black);margin-left:3px">${y}</b></div><div class="li"><div class="ld" style="background:var(--our)"></div>Наш: <b style="color:var(--black);margin-left:3px">${o}</b></div>`;
+}
+
+function renderDNType(data){
+  const day=data.filter(v=>!v.isNight), night=data.filter(v=>v.isNight);
+  const cnt=arr=>({c:arr.filter(v=>v.visitor==='client').length,y:arr.filter(v=>v.visitor==='yandex').length,o:arr.filter(v=>v.visitor==='our').length});
+  const dc2=cnt(day),nc=cnt(night);
+  dc('chDNType');
+  charts['chDNType']=new Chart(document.getElementById('chDNType'),{type:'bar',data:{labels:['Клиент','Яндекс','Наш'],datasets:[{label:'День',data:[dc2.c,dc2.y,dc2.o],backgroundColor:'rgba(245,197,24,.85)',borderRadius:5},{label:'Ночь',data:[nc.c,nc.y,nc.o],backgroundColor:'rgba(107,127,255,.85)',borderRadius:5}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{font:{family:'Montserrat',size:11}}},y:{grid:{color:'#f0f0f0'},ticks:{font:{family:'Montserrat',size:10}},beginAtZero:true}}}});
+}
+
+// ══════════════════════════════════════════
+// WORKERS
+// ══════════════════════════════════════════
+function setPeriodW(d,el){ wPeriod=d; document.querySelectorAll('#tab-workers .pbtn').forEach(b=>b.classList.remove('active')); el.classList.add('active'); renderWorkers(); }
+
+function renderWorkers(){
+  const cutoff=new Date(Date.now()-wPeriod*864e5);
+  const visits=allVisits.filter(v=>new Date(v.ts||v.shiftTs||new Date())>=cutoff);
+  const wmap={};
+  allShifts.filter(s=>new Date(s.shiftStart||new Date())>=cutoff).forEach(s=>{
+    if(!wmap[s.worker]) wmap[s.worker]={visits:0,orders:0,issued:0,returned:0,day:0,night:0,c:0,y:0,o:0,shifts:0,shiftList:[]};
+    wmap[s.worker].shifts++;
+    wmap[s.worker].shiftList.push(s);
+  });
+  visits.forEach(v=>{
+    if(!wmap[v.worker]) wmap[v.worker]={visits:0,orders:0,issued:0,returned:0,day:0,night:0,c:0,y:0,o:0,shifts:0,shiftList:[]};
+    const w=wmap[v.worker];
+    w.visits++;
+    const ords=v.ordersArr.filter(o=>o.id&&o.id!=='__other__');
+    w.orders+=ords.length;
+    if(['issue','pickup'].includes(v.operation)) w.issued+=ords.length;
+    if(['return','dropoff','both'].includes(v.operation)) w.returned+=ords.length;
+    if(!v.isNight)w.day++; else w.night++;
+    if(v.visitor==='client')w.c++; else if(v.visitor==='yandex')w.y++; else if(v.visitor==='our')w.o++;
+  });
+
+  const html = Object.entries(wmap).sort((a,b)=>b[1].visits-a[1].visits).map(([name,w])=>`
+    <div style="background:var(--card);border-radius:14px;border:1px solid var(--rule);margin-bottom:14px;overflow:hidden">
+      <div style="background:var(--black);padding:12px 16px;display:flex;align-items:center;justify-content:space-between">
+        <div style="font-size:15px;font-weight:700;color:#fff">${name}</div>
+        <div style="font-size:11px;color:var(--accent);font-weight:600">${w.shifts} смен</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);border-bottom:1px solid var(--rule)">
+        <div style="padding:10px;text-align:center;border-right:1px solid var(--rule)">
+          <div style="font-size:22px;font-weight:700;color:var(--black)">${w.visits}</div>
+          <div style="font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--light);margin-top:2px">Визитов</div>
+        </div>
+        <div style="padding:10px;text-align:center;border-right:1px solid var(--rule)">
+          <div style="font-size:22px;font-weight:700;color:var(--black)">${w.orders}</div>
+          <div style="font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--light);margin-top:2px">Заказов</div>
+        </div>
+        <div style="padding:10px;text-align:center">
+          <div style="font-size:22px;font-weight:700;color:var(--black)">${w.visits?Math.round(w.orders/w.visits*10)/10:0}</div>
+          <div style="font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--light);margin-top:2px">Заказов/визит</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid var(--rule)">
+        <div style="padding:9px 14px;border-right:1px solid var(--rule)">
+          <div style="font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--light);margin-bottom:6px">По визитам</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <span class="badge day">☀️ ${w.day} дн.</span>
+            <span class="badge night">🌙 ${w.night} ноч.</span>
+          </div>
+        </div>
+        <div style="padding:9px 14px">
+          <div style="font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--light);margin-bottom:6px">По заказам</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <span class="badge issued">↑ ${w.issued}</span>
+            <span class="badge returned">↓ ${w.returned}</span>
+          </div>
+        </div>
+      </div>
+      <div style="padding:9px 14px">
+        <div style="font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--light);margin-bottom:6px">Кто приезжал</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <span class="badge client">🧑 ${w.c}</span>
+          <span class="badge yandex">🚕 ${w.y}</span>
+          <span class="badge our">🚛 ${w.o}</span>
+        </div>
+      </div>
+    </div>`).join('');
+
+  document.getElementById('workerCards').innerHTML = html || '<div style="text-align:center;padding:40px;color:var(--light)">Нет данных за период</div>';
+}
+
+// ══════════════════════════════════════════
+// TIMESHEET (табель часов)
+// ══════════════════════════════════════════
+function setPeriodTS(d,el){ tsPeriod=d; document.querySelectorAll('#tab-timesheet .pbtn').forEach(b=>b.classList.remove('active')); el.classList.add('active'); renderTimesheet(); }
+
+function calcShiftHours(s){
+  if(!s.shiftStart||!s.shiftEnd) return {total:0,night:0};
+  const start=new Date(s.shiftStart), end=new Date(s.shiftEnd);
+  const totalMs=end-start;
+  if(totalMs<=0) return {total:0,night:0};
+  const totalH=totalMs/3600000;
+  // Calculate night hours (22:00–09:00 MSK)
+  let nightMs=0;
+  const cur=new Date(start);
+  while(cur<end){
+    const next=new Date(Math.min(cur.getTime()+3600000,end.getTime()));
+    const hMsk=(cur.getUTCHours()+MSK_OFFSET)%24;
+    if(hMsk>=22||hMsk<9) nightMs+=next-cur;
+    cur.setTime(next.getTime());
+  }
+  return {total:Math.round(totalH*10)/10, night:Math.round(nightMs/3600000*10)/10};
+}
+
+function renderTimesheet(){
+  const cutoff=new Date(Date.now()-tsPeriod*864e5);
+  const shifts=allShifts.filter(s=>new Date(s.shiftStart||new Date())>=cutoff);
+  const wmap={};
+  shifts.forEach(s=>{
+    if(!wmap[s.worker]) wmap[s.worker]={shifts:[],totalH:0,nightH:0};
+    const h=calcShiftHours(s);
+    wmap[s.worker].shifts.push({...s,hours:h.total,nightHours:h.night});
+    wmap[s.worker].totalH+=h.total;
+    wmap[s.worker].nightH+=h.night;
+  });
+
+  const html=Object.entries(wmap).sort((a,b)=>b[1].totalH-a[1].totalH).map(([name,w])=>{
+    const rows=w.shifts.sort((a,b)=>b.shiftStart>a.shiftStart?1:-1).map(s=>{
+      const dStr=s.shiftDate||new Date(s.shiftStart).toLocaleDateString('ru',{day:'numeric',month:'short',timeZone:'Europe/Moscow'});
+      const tStart=s.shiftStart?new Date(s.shiftStart).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit',timeZone:'Europe/Moscow'}):'—';
+      const tEnd  =s.shiftEnd  ?new Date(s.shiftEnd).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit',timeZone:'Europe/Moscow'}):'—';
+      return `<div class="ts-row">
+        <span class="ts-date">${dStr} · ${tStart}–${tEnd}</span>
+        <span>
+          <span class="ts-hours">${s.hours}ч</span>
+          ${s.nightHours>0?`<span class="ts-night">🌙 ${s.nightHours}ч</span>`:''}
+        </span>
+      </div>`;
+    }).join('');
+    const dayH=Math.round((w.totalH-w.nightH)*10)/10;
+    return `<div class="ts-card">
+      <div class="ts-card-hdr">
+        <span class="ts-card-name">${name}</span>
+        <span class="ts-card-total">${w.totalH.toFixed(1)}ч всего</span>
+      </div>
+      ${rows}
+      <div class="ts-summary">
+        <div class="ts-sum-item"><div class="ts-sum-n">${w.totalH.toFixed(1)}</div><div class="ts-sum-l">Всего часов</div></div>
+        <div class="ts-sum-item"><div class="ts-sum-n">${dayH.toFixed(1)}</div><div class="ts-sum-l">Дневных</div></div>
+        <div class="ts-sum-item"><div class="ts-sum-n" style="color:var(--night)">${w.nightH.toFixed(1)}</div><div class="ts-sum-l">Ночных</div></div>
+      </div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('tsGrid').innerHTML=html||'<div style="text-align:center;padding:40px;color:var(--light)">Нет данных за период</div>';
+}
+
+function exportTimesheet(){
+  const cutoff=new Date(Date.now()-tsPeriod*864e5);
+  const shifts=allShifts.filter(s=>new Date(s.shiftStart||new Date())>=cutoff);
+  const rows=shifts.map(s=>{
+    const h=calcShiftHours(s);
+    const tS=s.shiftStart?new Date(s.shiftStart).toLocaleString('ru',{timeZone:'Europe/Moscow'}):'';
+    const tE=s.shiftEnd  ?new Date(s.shiftEnd).toLocaleString('ru',{timeZone:'Europe/Moscow'}):'';
+    return [s.worker,s.shiftDate||'',tS,tE,h.total,h.night,Math.round((h.total-h.night)*10)/10,s.isNight||''];
+  });
+  const csv=[['Кладовщик','Дата смены','Начало (МСК)','Конец (МСК)','Всего часов','Ночных часов','Дневных часов','День/Ночь'],...rows].map(r=>r.join(';')).join('\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'}));
+  a.download=`табель_${new Date().toISOString().split('T')[0]}.csv`; a.click();
+}
+
+// ══════════════════════════════════════════
+// LOG
+// ══════════════════════════════════════════
+function setPeriodL(d,el){ logPeriod=d; document.querySelectorAll('#tab-log .pbtn').forEach(b=>b.classList.remove('active')); el.classList.add('active'); renderLog(); }
+
+function renderLog(){
+  const cutoff=new Date(Date.now()-logPeriod*864e5);
+  const visits=[...allVisits].filter(v=>new Date(v.ts||v.shiftTs||new Date())>=cutoff)
+    .sort((a,b)=>(b.ts||b.shiftTs||'')>(a.ts||a.shiftTs||'')?1:-1).slice(0,300);
+  const tbody=document.getElementById('logTbody');
+  if(!visits.length){ tbody.innerHTML='<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--light)">Нет записей</td></tr>'; return; }
+  tbody.innerHTML=visits.map(v=>{
+    const d=new Date(v.ts||v.shiftTs||new Date());
+    const dStr=d.toLocaleDateString('ru',{day:'numeric',month:'short',timeZone:'Europe/Moscow'});
+    const ords=v.ordersArr.filter(o=>o.id&&o.id!=='__other__');
+    const ordHtml=ords.length?ords.map(o=>`<span class="onum" style="font-size:10px">${o.id}</span>${o.client?` <span style="font-size:9px;color:var(--muted)">${o.client}</span>`:''}`).join('<br>'):'—';
+    return `<tr>
+      <td>${dStr}</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted)">${v.time||'—'}</td>
+      <td><span class="badge ${v.isNight?'night':'day'}">${v.isNight?'Ночь':'День'}</span></td>
+      <td><strong>${v.worker||'—'}</strong></td>
+      <td>${v.visitor?`<span class="badge ${v.visitor}">${VIS[v.visitor]||v.visitor}</span>`:'—'}</td>
+      <td style="font-size:11px;font-weight:600;color:var(--mid)">${OPL[v.operation]||v.operation||'—'}</td>
+      <td>${ordHtml}</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted)">${ords.length||'—'}</td>
+      <td style="font-size:11px;color:var(--muted)">${v.comment||'—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function exportCSV(){
+  const cutoff=new Date(Date.now()-logPeriod*864e5);
+  const visits=allVisits.filter(v=>new Date(v.ts||v.shiftTs||new Date())>=cutoff);
+  const rows=visits.flatMap(v=>{
+    const ords=v.ordersArr.filter(o=>o.id&&o.id!=='__other__');
+    if(!ords.length) return [[new Date(v.ts||v.shiftTs||new Date()).toLocaleDateString('ru',{timeZone:'Europe/Moscow'}),v.time||'',v.isNight?'Ночь':'День',v.worker||'',VIS[v.visitor]||v.visitor||'',OPL[v.operation]||v.operation||'','','','',v.comment||'']];
+    return ords.map(o=>[new Date(v.ts||v.shiftTs||new Date()).toLocaleDateString('ru',{timeZone:'Europe/Moscow'}),v.time||'',v.isNight?'Ночь':'День',v.worker||'',VIS[v.visitor]||v.visitor||'',OPL[v.operation]||v.operation||'',o.id,o.client||'',o.returnDate||'',v.comment||'']);
+  });
+  const csv=[['Дата','Время визита (МСК)','Сутки','Кладовщик','Кто','Операция','Заказ','Клиент','Дата возврата','Комментарий'],...rows].map(r=>r.join(';')).join('\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'}));
+  a.download=`журнал_${new Date().toISOString().split('T')[0]}.csv`; a.click();
+}
+
+// ══════════════════════════════════════════
+// UTILS
+// ══════════════════════════════════════════
+function dc(id){ if(charts[id]){charts[id].destroy();delete charts[id];} }
+
+// ══════════════════════════════════════════
+// DEMO DATA
+// ══════════════════════════════════════════
+function genDemoOrders(){
+  const d=p=>{const dt=new Date();dt.setDate(dt.getDate()+p);return dt.toLocaleDateString('ru',{day:'numeric',month:'short'})};
+  return[
+    {id:'A-4521',client:'Иванова Мария',issueDate:d(0),returnDate:d(3),delivery:'Наша доставка',worker:'Евгений Бец',status:'pending',type:'issue',issueTime:'10:00',returnTime:''},
+    {id:'A-4522',client:'Петров Александр',issueDate:d(0),returnDate:d(0),delivery:'Самовывоз',worker:'',status:'pending',type:'return',issueTime:'',returnTime:'14:00'},
+    {id:'A-4523',client:'Сидорова Анна',issueDate:d(0),returnDate:d(5),delivery:'Наша доставка',worker:'Ислам Абдуганиев',status:'pending',type:'issue',issueTime:'12:00',returnTime:''},
+  ];
+}
+
+function genDemoShifts(){
+  const workers=['Оля','Тамилла','Максим','Гоша','Алевтина','Наташа'];
+  const vis=['client','client','yandex','our'];
+  const ops={client:['issue','return'],yandex:['issue','return'],our:['pickup','dropoff','both']};
+  const hoursW=[9,10,10,11,11,12,12,13,14,15,16,16,17,17,18,18,19,20,21,22,23];
+  const shifts=[];
+  for(let d=0;d<60;d++){
+    const date=new Date(); date.setDate(date.getDate()-d);
+    const isNight=Math.random()<0.3;
+    const w=workers[Math.floor(Math.random()*workers.length)];
+    const shiftStart=new Date(date); shiftStart.setHours(isNight?22:9);
+    const shiftEnd=new Date(shiftStart); shiftEnd.setHours(shiftStart.getHours()+(isNight?9:8));
+    const n=2+Math.floor(Math.random()*8);
+    const entries=[];
+    for(let i=0;i<n;i++){
+      const v=vis[Math.floor(Math.random()*vis.length)];
+      const op=ops[v][Math.floor(Math.random()*ops[v].length)];
+      const h=isNight?(22+Math.floor(Math.random()*4))%24:hoursW[Math.floor(Math.random()*hoursW.length)];
+      const time=`${String(h).padStart(2,'0')}:${String(Math.floor(Math.random()*60)).padStart(2,'0')}`;
+      const ordCount=['issue','pickup'].includes(op)?1+Math.floor(Math.random()*3):1;
+      const orders=Array.from({length:ordCount},(_,j)=>({id:`A-${4000+Math.floor(Math.random()*999)}`,client:'Клиент '+Math.floor(Math.random()*100),returnDate:'',delivery:Math.random()>.5?'Наша доставка':'Самовывоз'}));
+      entries.push({visitor:v,operation:op,orders,orderId:orders[0].id,orderClient:orders[0].client,orderReturnDate:'',orderDelivery:orders[0].delivery,comment:'',time,timeAuto:time,timestamp:date.toISOString(),night:isNight?'Ночь':'День'});
+    }
+    shifts.push({worker:w,shiftDate:date.toLocaleDateString('ru'),shiftStart:shiftStart.toISOString(),shiftEnd:shiftEnd.toISOString(),isNight:isNight?'Ночь':'День',totalEntries:n,entries});
+  }
+  return shifts;
+}
+</script>
+</body>
+</html>
