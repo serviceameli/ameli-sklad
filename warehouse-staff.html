@@ -236,21 +236,37 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
 .sr-v{font-size:12px;font-weight:700;color:var(--black)}
 .btn-again{width:100%;background:var(--accent);color:var(--black);border:none;border-radius:13px;padding:14px;font-family:'Montserrat',sans-serif;font-size:14px;font-weight:700;cursor:pointer}
 
-/* ── MODAL ── */
-.ovl{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:500;align-items:flex-end}
-.ovl.show{display:flex}
-.modal{background:var(--card);border-radius:18px 18px 0 0;padding:19px 17px 26px;width:100%;animation:slideUp .2s ease}
-.modal-h{font-size:15px;font-weight:700;color:var(--black);margin-bottom:3px}
-.modal-s{font-size:12px;color:var(--muted);margin-bottom:13px}
-.mrow{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--rule);font-size:12px}
-.mrow:last-of-type{border-bottom:none}
-.mrow b{color:var(--black)}
-.macts{display:flex;gap:7px;margin-top:11px}
-.mcancel{flex:1;background:var(--bg);border:2px solid var(--rule);border-radius:11px;padding:11px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:700;color:var(--mid);cursor:pointer}
-.mok{flex:2;background:var(--black);border:none;border-radius:11px;padding:11px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:700;color:#fff;cursor:pointer}
+/* ── VERTICAL VISITOR BUTTONS ── */
+.vis-btns{display:flex;flex-direction:column;gap:8px}
+.vbtn{width:100%;border:2px solid var(--rule);background:var(--card);border-radius:12px;padding:14px 16px;font-family:'Montserrat',sans-serif;font-size:15px;font-weight:700;color:var(--text);cursor:pointer;text-align:left;transition:all .14s;display:flex;align-items:center;gap:10px}
+.vbtn:active{transform:scale(.98)}
+.vbtn.act{color:#fff;border-color:transparent}
+.vbtn.act.c{background:var(--client)}
+.vbtn.act.y{background:var(--yandex)}
+.vbtn.act.o{background:var(--our)}
+/* ── TIME+COMMENT ROW ── */
+.tc2-row{display:flex;gap:8px;align-items:flex-end;margin-top:7px}
+.tc2-row .field-g:first-child{flex:0 0 90px}
+/* ── COMPACT DATE ── */
+.date-compact-row{margin-top:5px;margin-bottom:2px}
+.date-compact-lbl{font-size:11px;color:var(--muted);font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:4px;padding:3px 0;user-select:none}
+.date-compact-lbl:hover{color:var(--black)}
+.date-compact-picker{margin-top:5px}
+/* ── TOAST ── */
+.toast{position:fixed;top:62px;left:50%;transform:translateX(-50%);background:var(--black);color:#fff;padding:10px 22px;border-radius:22px;font-size:13px;font-weight:700;z-index:999;opacity:0;transition:opacity .25s;pointer-events:none;white-space:nowrap;border:2px solid var(--accent)}
+.toast.show{opacity:1}
+/* ── OVERDUE ── */
+.badge-overdue{display:inline-block;background:rgba(231,76,60,.15);color:#c0392b;border-radius:20px;font-size:10px;font-weight:700;padding:2px 7px}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
+.ob-item.ov .ob-n{color:#E74C3C}
+.order-card.overdue{border-left-color:#E74C3C}
+.oc-status.overdue{background:rgba(231,76,60,.15);color:#c0392b;animation:pulse 2s infinite}
 </style>
 </head>
 <body>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
 
 <!-- CONFIRM MODAL -->
 <div class="ovl" id="ovl" onclick="closeModal(event)">
@@ -320,6 +336,7 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
       <div class="ob-item pen"><div class="ob-n" id="bar-pending">0</div><div class="ob-l">⏳ Ожидают</div></div>
       <div class="ob-item iss"><div class="ob-n" id="bar-issued">0</div><div class="ob-l">✓ Выдано</div></div>
       <div class="ob-item ret"><div class="ob-n" id="bar-returned">0</div><div class="ob-l">🔄 Возврат</div></div>
+      <div class="ob-item ov"><div class="ob-n" id="bar-overdue">0</div><div class="ob-l">🔴 Просроч.</div></div>
     </div>
 
     <!-- ADD FORM -->
@@ -329,13 +346,13 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
         <span class="add-collapse" id="collapseBtn" onclick="toggleForm()">свернуть ▲</span>
       </div>
       <div id="formBody">
-        <!-- Visitor type -->
-        <div style="margin-bottom:7px">
+        <!-- Visitor type — vertical large buttons -->
+        <div style="margin-bottom:10px">
           <label class="flbl">Кто приехал</label>
-          <div class="seg">
-            <button class="sbtn c" onclick="setVisitor('client',this)">🧑 Клиент</button>
-            <button class="sbtn y" onclick="setVisitor('yandex',this)">🚕 Яндекс</button>
-            <button class="sbtn o" onclick="setVisitor('our',this)">🚛 Наш курьер</button>
+          <div class="vis-btns">
+            <button class="vbtn c" onclick="setVisitor('client',this)">🧑 Клиент</button>
+            <button class="vbtn y" onclick="setVisitor('yandex',this)">🚕 Курьер Яндекс</button>
+            <button class="vbtn o" onclick="setVisitor('our',this)">🚛 Наш курьер</button>
           </div>
         </div>
 
@@ -367,23 +384,27 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
           <div class="opg" id="opGroup"></div>
         </div>
 
-        <!-- Date + Time + Comment -->
-        <div class="dtc-row">
-          <div class="field-g">
-            <label class="flbl">Дата визита</label>
-            <select class="date-sel" id="dateInp" onchange="onDateChange()"></select>
-            <div class="inp-hint" id="dateHint">сегодня</div>
-          </div>
+        <!-- Time + Comment + Date (pencil) -->
+        <div class="tc2-row">
           <div class="field-g">
             <label class="flbl">Время (МСК)</label>
             <input class="time-inp" id="timeInp" type="time">
-            <div class="inp-hint">можно изменить</div>
           </div>
-          <div class="field-g">
+          <div class="field-g" style="flex:1">
             <label class="flbl">Комментарий</label>
             <textarea class="comment-inp" id="commentInp" placeholder="необязательно..."></textarea>
           </div>
         </div>
+        <!-- Date — compact, hidden by default -->
+        <div class="date-compact-row">
+          <span class="date-compact-lbl" id="dateLbl" onclick="toggleDatePicker()">
+            📅 <span id="dateLblText">—</span> ✏️
+          </span>
+          <div class="date-compact-picker" id="datePicker" style="display:none">
+            <select class="date-sel" id="dateInp" onchange="onDateChange()"></select>
+          </div>
+        </div>
+
         <button class="add-btn" id="addBtn" onclick="addVisit()" disabled>＋ Добавить визит</button>
       </div>
     </div>
@@ -407,8 +428,8 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
     </div>
 
     <div class="sub-footer">
-      <button class="sub-btn" id="subBtn" disabled onclick="openModal()">Завершить смену и отправить</button>
-      <div class="sub-hint" id="subHint">Добавьте хотя бы один визит</div>
+      <button class="sub-btn" id="subBtn" onclick="openModal()">Закрыть смену ✓</button>
+      <div class="sub-hint" id="subHint">Визитов за смену: 0</div>
     </div>
   </div>
 
@@ -419,7 +440,7 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
       <div id="ordersCards"></div>
     </div>
     <div class="sub-footer">
-      <button class="sub-btn" id="subBtn2" disabled onclick="openModal()">Завершить смену и отправить</button>
+      <button class="sub-btn" id="subBtn2" onclick="openModal()">Закрыть смену ✓</button>
       <div class="sub-hint" id="subHint2"></div>
     </div>
   </div>
@@ -492,6 +513,7 @@ function renderDateLine(){
 }
 function populateDatePicker(){
   const sel=document.getElementById('dateInp');
+  if(!sel) return;
   sel.innerHTML='';
   const today=mskNow();
   for(let i=0;i<4;i++){
@@ -500,17 +522,35 @@ function populateDatePicker(){
     opt.value=d.toISOString().split('T')[0];
     const dy=DAYS_SHORT[d.getUTCDay()];
     const ds=d.toLocaleDateString('ru',{day:'numeric',month:'short',timeZone:'UTC'});
-    opt.textContent=i===0?`Сегодня, ${dy} ${ds}`:`${dy}, ${ds}`;
+    opt.textContent=`${dy}, ${ds}`;
     if(i===0)opt.selected=true;
     sel.appendChild(opt);
   }
+  updateDateLabel();
+}
+function updateDateLabel(){
+  const sel=document.getElementById('dateInp');
+  const lbl=document.getElementById('dateLblText');
+  if(!sel||!lbl) return;
+  lbl.textContent=sel.options[sel.selectedIndex]?.textContent||'—';
+}
+function toggleDatePicker(){
+  const p=document.getElementById('datePicker');
+  if(p) p.style.display=p.style.display==='none'?'block':'none';
 }
 function onDateChange(){
-  const idx=document.getElementById('dateInp').selectedIndex;
-  const hint=document.getElementById('dateHint');
-  const sel=document.getElementById('dateInp');
-  if(idx===0){ sel.classList.remove('mod'); hint.textContent='сегодня'; hint.style.color=''; }
-  else { sel.classList.add('mod'); hint.textContent='⚠️ прошлая дата'; hint.style.color='#FF6B35'; }
+  updateDateLabel();
+  // close picker after picking
+  const p=document.getElementById('datePicker');
+  if(p) p.style.display='none';
+}
+function showToast(msg, color){
+  const t=document.getElementById('toast');
+  if(!t) return;
+  t.textContent=msg;
+  t.style.borderColor=color||'var(--accent)';
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'),2200);
 }
 
 // ── LOAD ──
@@ -610,14 +650,12 @@ function startShift(){
   document.getElementById('shiftWho').innerHTML=worker+`<span>· ${nowTime()} МСК</span>`;
   showScreen('s-shift');
   pendingOrders=[]; renderPendingOrders();
-  setVisitor('client',document.querySelector('.sbtn.c'));
+  setVisitor('client',document.querySelector('.vbtn.c'));
   document.getElementById('timeInp').value=nowTime();
-  // Сразу получаем свежие заказы с сервера
-  refreshOrdersFromServer().then(()=>{
-    updateOrdersBar(); renderOrderCards();
-  });
+  updateDateLabel();
+  refreshOrdersFromServer().then(()=>{ updateOrdersBar(); renderOrderCards(); });
   startAutosave();
-  startOrdersRefresh(); // и затем каждые 60 сек
+  startOrdersRefresh();
 }
 
 // ── SHIFT TABS ──
@@ -641,10 +679,19 @@ function populateOrders(){
 
   const {issuedIds, returnedIds}=getSessionStatuses();
 
-  // Исключаем из выдачи: уже выданные
-  const toIssue  = orders.filter(o=>o.type==='issue'  && !issuedIds.has(o.id) && !returnedIds.has(o.id));
-  // Исключаем из возврата: уже возвращённые И уже выданные (выдан = обработан)
-  const toReturn = orders.filter(o=>o.type==='return' && !returnedIds.has(o.id) && !issuedIds.has(o.id));
+  const toIssue  = orders.filter(o=>o.type==='issue'  && !issuedIds.has(o.id) && !returnedIds.has(o.id) && !o.overdue);
+  const toReturn = orders.filter(o=>o.type==='return' && !returnedIds.has(o.id) && !issuedIds.has(o.id) && !o.overdue);
+  const overdue  = orders.filter(o=>o.overdue && !issuedIds.has(o.id) && !returnedIds.has(o.id));
+
+  if(overdue.length){
+    const g=document.createElement('optgroup'); g.label='🔴 Просрочены';
+    overdue.forEach(o=>{
+      const opt=document.createElement('option'); opt.value=o.id; opt.dataset.type=o.type;
+      opt.textContent=`🔴 ${o.id} · ${o.client}`;
+      g.appendChild(opt);
+    });
+    sel.appendChild(g);
+  }
 
   if(toIssue.length){
     const g=document.createElement('optgroup'); g.label='📦 К выдаче сегодня';
@@ -796,10 +843,9 @@ function renderPendingOrders(){
 // ── VISITOR / OP ──
 function setVisitor(v,el){
   visitor=v; operation=null;
-  document.querySelectorAll('.sbtn').forEach(b=>b.classList.remove('act'));
+  document.querySelectorAll('.vbtn').forEach(b=>b.classList.remove('act'));
   el.classList.add('act');
   if(hasOther){ renderOps(); document.getElementById('opSection').classList.add('show'); }
-  // Re-trigger auto-set if order in pending
   const firstOrder=pendingOrders.find(o=>o.id&&o.id!=='__other__');
   if(firstOrder&&firstOrder.type){ const tOp=firstOrder.type==='issue'?'issue':'return'; const valid=OPS[v]||[]; if(valid.find(op=>op.id===tOp)){operation=tOp;document.querySelectorAll('.opb').forEach(b=>{b.classList.remove('act','auto');if(b.dataset.op===tOp)b.classList.add('auto');});} }
   checkReady();
@@ -887,12 +933,12 @@ function addVisit(){
   document.getElementById('aoAddBtn').disabled=true;
   document.getElementById('commentInp').value='';
   document.getElementById('timeInp').value=nowTime();
-  document.getElementById('dateInp').selectedIndex=0; onDateChange();
+  document.getElementById('dateInp').selectedIndex=0; updateDateLabel();
   checkReady();
   renderTable(); updateOrdersBar(); renderOrderCards();
-  // refresh dropdown to remove newly issued orders
   populateOrders();
   saveDraft();
+  showToast('✓ Визит записан', 'var(--client)');
 }
 
 // ── TABLE ──
@@ -900,10 +946,17 @@ function renderTable(){
   const tbody=document.getElementById('logBody');
   const empty=document.getElementById('emptySt');
   const cnt=document.getElementById('tarea-cnt');
-  if(!visits.length){ tbody.innerHTML=''; empty.style.display='block'; cnt.textContent='';
-    document.getElementById('subBtn').disabled=true; document.getElementById('subBtn2').disabled=true;
-    document.getElementById('subHint').textContent='Добавьте хотя бы один визит';
-    document.getElementById('subHint2').textContent=''; return; }
+
+  const hint=visits.length
+    ? `${visits.length} ${pl(visits.length,'визит','визита','визитов')} за смену`
+    : 'Нет визитов — можно закрыть смену';
+  document.getElementById('subHint').textContent=hint;
+  document.getElementById('subHint2').textContent=hint;
+
+  if(!visits.length){
+    tbody.innerHTML=''; empty.style.display='block'; cnt.textContent='';
+    return;
+  }
   empty.style.display='none';
   cnt.textContent=visits.length+' '+pl(visits.length,'визит','визита','визитов');
 
@@ -946,8 +999,8 @@ function renderTable(){
   tbody.innerHTML=html;
 
   document.getElementById('subBtn').disabled=false; document.getElementById('subBtn2').disabled=false;
-  const hint=`${visits.length} ${pl(visits.length,'визит','визита','визитов')} · готово к отправке`;
-  document.getElementById('subHint').textContent=hint; document.getElementById('subHint2').textContent=hint;
+  const hint2=`${visits.length} ${pl(visits.length,'визит','визита','визитов')} · готово к отправке`;
+  document.getElementById('subHint').textContent=hint2; document.getElementById('subHint2').textContent=hint2;
 }
 
 function delVisit(i){ visits.splice(i,1); visits.forEach((v,j)=>v.n=j+1); renderTable(); updateOrdersBar(); renderOrderCards(); populateOrders(); saveDraft(); }
@@ -955,13 +1008,20 @@ function delVisit(i){ visits.splice(i,1); visits.forEach((v,j)=>v.n=j+1); render
 // ── ORDERS BAR ──
 function updateOrdersBar(){
   const {issuedIds,returnedIds}=getSessionStatuses();
-  let p=0,is=0,re=0;
-  orders.forEach(o=>{ if(issuedIds.has(o.id))is++; else if(returnedIds.has(o.id))re++; else p++; });
+  let p=0,is=0,re=0,ov=0;
+  orders.forEach(o=>{
+    if(issuedIds.has(o.id))      is++;
+    else if(returnedIds.has(o.id)) re++;
+    else if(o.overdue)             ov++;
+    else                           p++;
+  });
   document.getElementById('bar-pending').textContent=p;
   document.getElementById('bar-issued').textContent=is;
   document.getElementById('bar-returned').textContent=re;
+  const ovEl=document.getElementById('bar-overdue');
+  if(ovEl) ovEl.textContent=ov;
   const badge=document.getElementById('pendingBadge');
-  if(p>0){badge.style.display='inline-block';badge.textContent=p;badge.className='stab-badge';}
+  if(p+ov>0){badge.style.display='inline-block';badge.textContent=p+ov;badge.className='stab-badge';}
   else if(is+re>0){badge.style.display='inline-block';badge.textContent='✓';badge.className='stab-badge grn';}
   else{badge.style.display='none';}
 }
@@ -971,23 +1031,28 @@ function renderOrderCards(){
   const {issuedIds,returnedIds}=getSessionStatuses();
   const display=orders.map(o=>{
     let s=o.status||'pending';
-    if(issuedIds.has(o.id))   s='issued';
-    if(returnedIds.has(o.id)) s='returned';
+    if(issuedIds.has(o.id))    s='issued';
+    if(returnedIds.has(o.id))  s='returned';
     return{...o,s};
   });
-  const pc=display.filter(o=>o.s==='pending').length;
+  const oc=display.filter(o=>o.overdue&&o.s==='pending').length;
+  const pc=display.filter(o=>!o.overdue&&o.s==='pending').length;
   const ic=display.filter(o=>o.s==='issued').length;
   const rc=display.filter(o=>o.s==='returned').length;
   document.getElementById('ordersMini').innerHTML=[
     ['Ожидают','var(--pending)',pc],['Выдано','var(--issued)',ic],['Возвращено','var(--ret)',rc]
   ].map(([l,c,n])=>`<div class="osc" style="border-top:2px solid ${c}"><div class="osc-l">${l}</div><div class="osc-n">${n}</div></div>`).join('');
 
-  // Separate: ONLY pending in their sections, done goes to bottom group
-  const pendingIssue  = display.filter(o=>o.type!=='return' && o.s==='pending');
-  const pendingReturn = display.filter(o=>o.type==='return'  && o.s==='pending');
-  const done          = display.filter(o=>o.s==='issued'||o.s==='returned');
+  const overdueOrders   = display.filter(o=>o.overdue && o.s==='pending');
+  const pendingIssue    = display.filter(o=>o.type!=='return' && o.s==='pending' && !o.overdue);
+  const pendingReturn   = display.filter(o=>o.type==='return'  && o.s==='pending' && !o.overdue);
+  const done            = display.filter(o=>o.s==='issued'||o.s==='returned');
 
   let html='';
+  if(overdueOrders.length){
+    html+=`<div class="sec-lbl" style="color:#E74C3C">🔴 Просрочены (${overdueOrders.length})</div>`;
+    html+=overdueOrders.map(o=>orderCard(o)).join('');
+  }
   if(pendingIssue.length){
     html+=`<div class="sec-lbl">📦 К выдаче</div>`;
     html+=pendingIssue.map(o=>orderCard(o)).join('');
@@ -1005,8 +1070,9 @@ function renderOrderCards(){
 }
 
 function orderCard(o){
-  const cls=o.s==='issued'?'issued':o.s==='returned'?'returned':o.type==='return'?'return-due':'pending';
-  const txt=o.s==='issued'?'✓ Выдан':o.s==='returned'?'✓ Возвращён':o.type==='return'?'🔄 К возврату':'⏳ Ожидает';
+  const isOverdue=o.overdue&&o.s==='pending';
+  const cls=o.s==='issued'?'issued':o.s==='returned'?'returned':isOverdue?'overdue':o.type==='return'?'return-due':'pending';
+  const txt=o.s==='issued'?'✓ Выдан':o.s==='returned'?'✓ Возвращён':isOverdue?'🔴 Просрочен':o.type==='return'?'🔄 К возврату':'⏳ Ожидает';
   return`<div class="order-card ${cls}">
     <div class="oc-top"><span class="oc-id">${o.id}</span><span class="oc-status ${cls}">${txt}</span></div>
     <div class="oc-client">${o.client||'—'}</div>
