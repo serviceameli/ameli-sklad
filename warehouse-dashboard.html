@@ -136,7 +136,23 @@ table.dt tbody tr:last-child td{border-bottom:none}
 .insight-num{font-size:20px;font-weight:700;line-height:1;margin-bottom:2px}
 .insight-lbl{font-size:9px;color:rgba(255,255,255,.45);font-weight:500}
 
-/* ── TIMESHEET ── */
+/* ── LINK TAB ── */
+.visit-card{background:var(--card);border-radius:12px;border:1px solid var(--rule);border-left:4px solid #E74C3C;padding:14px 16px;margin-bottom:10px}
+.visit-card-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.visit-card-title{font-size:13px;font-weight:700;color:var(--black)}
+.visit-card-meta{font-size:11px;color:var(--muted);margin-bottom:6px}
+.visit-card-comment{font-size:12px;color:var(--mid);background:var(--bg);border-radius:7px;padding:6px 10px;font-style:italic}
+.link-btn{background:var(--black);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap}
+.link-btn:hover{background:#333}
+.order-check-row{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--rule);cursor:pointer}
+.order-check-row:last-child{border-bottom:none}
+.order-check-row:hover{background:var(--bg)}
+.order-check-row input[type=checkbox]{width:18px;height:18px;accent-color:var(--black);flex-shrink:0}
+.order-check-id{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:var(--black)}
+.order-check-client{font-size:11px;color:var(--muted);margin-top:1px}
+.no-unmatched{text-align:center;padding:48px 20px;color:var(--light)}
+.no-unmatched-ico{font-size:40px;margin-bottom:10px}
+@keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
 .ts-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-bottom:20px}
 .ts-card{background:var(--card);border-radius:12px;border:1px solid var(--rule);overflow:hidden}
 .ts-card-hdr{background:var(--black);padding:10px 14px;display:flex;align-items:center;justify-content:space-between}
@@ -167,7 +183,19 @@ table.dt tbody tr:last-child td{border-bottom:none}
   <div class="tab" onclick="switchTab('stats')">📊 Статистика</div>
   <div class="tab" onclick="switchTab('workers')">🧑 Кладовщики</div>
   <div class="tab" onclick="switchTab('timesheet')">🕐 Табель часов</div>
+  <div class="tab" id="tab-link-btn" onclick="switchTab('link')">🔗 Сверка <span id="linkBadge" style="display:none;background:#E74C3C;color:#fff;border-radius:20px;font-size:9px;font-weight:700;padding:1px 6px;margin-left:3px;vertical-align:middle">0</span></div>
   <div class="tab" onclick="switchTab('log')">📋 Журнал</div>
+</div>
+
+<!-- NOTIFICATION BANNER -->
+<div id="linkNotification" style="display:none;background:#1A1A1A;color:#fff;padding:12px 20px;cursor:pointer;border-bottom:3px solid #E74C3C" onclick="switchTab('link')">
+  <div style="display:flex;align-items:center;gap:10px">
+    <span style="font-size:20px">🔗</span>
+    <div>
+      <div style="font-size:13px;font-weight:700" id="linkNotifTitle">Есть несвязанные визиты</div>
+      <div style="font-size:11px;color:#aaa">Нажмите чтобы сверить →</div>
+    </div>
+  </div>
 </div>
 
 <div class="main">
@@ -360,8 +388,38 @@ table.dt tbody tr:last-child td{border-bottom:none}
     </table>
   </div>
 </div>
+<!-- ══ СВЕРКА ══ -->
+<div class="tview" id="tab-link">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+    <div>
+      <div style="font-size:18px;font-weight:700;color:var(--black)">🔗 Сверка визитов с заказами</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:2px">Визиты «нет в списке» за последние 7 дней</div>
+    </div>
+    <button class="rfbtn" onclick="loadUnmatched()">↻ Обновить</button>
+  </div>
+  <div id="linkContent">
+    <div style="text-align:center;padding:40px;color:var(--light)">
+      <div style="font-size:28px;margin-bottom:8px">⏳</div>
+      <div>Загрузка...</div>
+    </div>
+  </div>
+</div>
 
 </div><!-- /main -->
+
+<!-- LINK MODAL -->
+<div id="linkModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:600;align-items:flex-end;justify-content:center">
+  <div style="background:#fff;border-radius:16px 16px 0 0;padding:22px 20px 32px;width:100%;max-width:600px;max-height:80vh;overflow-y:auto;animation:slideUp .2s ease">
+    <div style="font-size:16px;font-weight:700;color:var(--black);margin-bottom:4px">Связать визит с заказами</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:16px" id="linkModalVisitInfo">—</div>
+    <div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--light);margin-bottom:8px">Выберите заказы для привязки:</div>
+    <div id="linkModalOrders" style="max-height:300px;overflow-y:auto;margin-bottom:16px"></div>
+    <div style="display:flex;gap:10px">
+      <button onclick="closeLinkModal()" style="flex:1;background:var(--bg);border:2px solid var(--rule);border-radius:11px;padding:12px;font-family:'Montserrat',sans-serif;font-size:13px;font-weight:700;color:var(--mid);cursor:pointer">Отмена</button>
+      <button onclick="confirmLink()" id="linkConfirmBtn" style="flex:2;background:var(--black);border:none;border-radius:11px;padding:12px;font-family:'Montserrat',sans-serif;font-size:13px;font-weight:700;color:#fff;cursor:pointer">✓ Связать</button>
+    </div>
+  </div>
+</div>
 
 <script src="config.js"></script>
 <script>
@@ -442,6 +500,13 @@ async function loadData(){
     document.getElementById('rfts').textContent='Обновлено '+new Date().toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit',timeZone:'Europe/Moscow'})+' МСК';
 
   renderAll();
+  // Check for unmatched visits and show notification
+  if(!SCRIPT_URL.includes('YOUR_')){
+    fetch(SCRIPT_URL+'?action=getUnmatched&t='+Date.now())
+      .then(r=>r.json())
+      .then(j=>{ unmatchedData=j; updateLinkBadge(); })
+      .catch(()=>{});
+  }
 }
 
 function renderAll(){
@@ -457,10 +522,11 @@ function renderAll(){
 // TAB SWITCH
 // ══════════════════════════════════════════
 function switchTab(t){
-  const keys=['orders','schedule','stats','workers','timesheet','log'];
+  const keys=['orders','schedule','stats','workers','timesheet','link','log'];
   document.querySelectorAll('.tab').forEach((el,i)=>el.classList.toggle('active',keys[i]===t));
   document.querySelectorAll('.tview').forEach(v=>v.classList.remove('active'));
   document.getElementById('tab-'+t).classList.add('active');
+  if(t==='link') loadUnmatched();
 }
 
 // ══════════════════════════════════════════
@@ -923,6 +989,157 @@ function exportCSV(){
 // UTILS
 // ══════════════════════════════════════════
 function dc(id){ if(charts[id]){charts[id].destroy();delete charts[id];} }
+
+// ══════════════════════════════════════════
+// LINK / СВЕРКА
+// ══════════════════════════════════════════
+let unmatchedData = { unmatchedVisits: [], unlistedOrders: [] };
+let currentLinkVisit = null;
+let selectedOrderIds = new Set();
+
+async function loadUnmatched(){
+  document.getElementById('linkContent').innerHTML=`<div style="text-align:center;padding:40px;color:var(--light)"><div style="font-size:28px;margin-bottom:8px">⏳</div><div>Загрузка...</div></div>`;
+  if(SCRIPT_URL.includes('YOUR_')){
+    unmatchedData={unmatchedVisits:[],unlistedOrders:[]};
+    renderLinkTab();
+    return;
+  }
+  try{
+    const r=await fetch(SCRIPT_URL+'?action=getUnmatched&t='+Date.now());
+    unmatchedData=await r.json();
+  }catch(e){ unmatchedData={unmatchedVisits:[],unlistedOrders:[]}; }
+  renderLinkTab();
+  updateLinkBadge();
+}
+
+function updateLinkBadge(){
+  const n=unmatchedData.unmatchedVisits?.length||0;
+  const badge=document.getElementById('linkBadge');
+  const notif=document.getElementById('linkNotification');
+  if(n>0){
+    badge.style.display='inline'; badge.textContent=n;
+    notif.style.display='block';
+    document.getElementById('linkNotifTitle').textContent=`Есть ${n} ${pl(n,'несвязанный визит','несвязанных визита','несвязанных визитов')} — нужна сверка`;
+  } else {
+    badge.style.display='none'; notif.style.display='none';
+  }
+}
+
+function renderLinkTab(){
+  const visits=unmatchedData.unmatchedVisits||[];
+  const orders=unmatchedData.unlistedOrders||[];
+  const el=document.getElementById('linkContent');
+
+  if(!visits.length && !orders.length){
+    el.innerHTML=`<div class="no-unmatched"><div class="no-unmatched-ico">✅</div><div style="font-size:15px;font-weight:700;color:var(--black);margin-bottom:6px">Всё в порядке!</div><div style="font-size:12px">Нет визитов «нет в списке» за последние 7 дней</div></div>`;
+    return;
+  }
+
+  let html='';
+
+  // Unmatched visits
+  if(visits.length){
+    html+=`<div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--light);margin-bottom:10px">🔴 Визиты без заказа (${visits.length})</div>`;
+    visits.forEach((v,i)=>{
+      const opLabel={Выдача:'📦 Выдача','Получение (наш)':'📥 Получение','Получение+Возврат':'🔃 Получ.+Возврат',Возврат:'🔄 Возврат','Возврат (наш)':'📤 Возврат'}[v.operation]||v.operation;
+      const visLabel={client:'🧑 Клиент',yandex:'🚕 Яндекс',our:'🚛 Наш курьер'}[v.visitor]||v.visitor;
+      html+=`<div class="visit-card">
+        <div class="visit-card-top">
+          <div>
+            <div class="visit-card-title">${v.shiftDate} · ${v.time||'—'} МСК</div>
+            <div class="visit-card-meta">${v.worker} · ${v.isNight==='Ночь'?'🌙':'☀️'} · ${visLabel} · ${opLabel}</div>
+          </div>
+          <button class="link-btn" onclick="openLinkModal(${i})">Связать →</button>
+        </div>
+        ${v.comment?`<div class="visit-card-comment">💬 ${v.comment}</div>`:''}
+        ${v.orders.length?`<div style="margin-top:6px;font-size:11px;color:var(--muted)">Уже привязаны: ${v.orders.map(o=>o.id).join(', ')}</div>`:''}
+      </div>`;
+    });
+  }
+
+  // Unlisted orders (have no log entry)
+  if(orders.length){
+    html+=`<div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--light);margin:20px 0 10px">📋 Заказы без записи в логе (${orders.length})</div>`;
+    html+=`<div class="twrap scroll"><table class="dt"><thead><tr><th>Заказ</th><th>Клиент</th><th>Дата выдачи</th><th>Возврат</th></tr></thead><tbody>`;
+    orders.forEach(o=>{
+      html+=`<tr><td><span class="onum">${o.id}</span></td><td><strong>${o.client}</strong></td><td>${o.issueDate||'—'}</td><td>${o.returnDate||'—'}</td></tr>`;
+    });
+    html+=`</tbody></table></div>`;
+  }
+
+  el.innerHTML=html;
+}
+
+function openLinkModal(visitIdx){
+  currentLinkVisit=unmatchedData.unmatchedVisits[visitIdx];
+  selectedOrderIds=new Set();
+  const orders=unmatchedData.unlistedOrders||[];
+  const v=currentLinkVisit;
+
+  document.getElementById('linkModalVisitInfo').textContent=
+    `${v.shiftDate} · ${v.time} МСК · ${v.worker} · ${v.operation}${v.comment?' · «'+v.comment+'»':''}`;
+
+  const ordersHtml=orders.length
+    ? orders.map(o=>`
+        <div class="order-check-row" onclick="toggleOrderCheck('${o.id}',this)">
+          <input type="checkbox" id="chk-${o.id}" value="${o.id}">
+          <div>
+            <div class="order-check-id">${o.id}</div>
+            <div class="order-check-client">${o.client}${o.issueDate?' · выдача '+o.issueDate:''}</div>
+          </div>
+        </div>`).join('')
+    : `<div style="text-align:center;padding:20px;color:var(--light)">Нет заказов без записи в логе</div>`;
+
+  document.getElementById('linkModalOrders').innerHTML=ordersHtml;
+  document.getElementById('linkModal').style.display='flex';
+  document.getElementById('linkConfirmBtn').disabled=true;
+}
+
+function toggleOrderCheck(id, row){
+  const chk=document.getElementById('chk-'+id);
+  chk.checked=!chk.checked;
+  if(chk.checked){ selectedOrderIds.add(id); row.style.background='var(--accent-dim)'; }
+  else { selectedOrderIds.delete(id); row.style.background=''; }
+  document.getElementById('linkConfirmBtn').disabled=selectedOrderIds.size===0;
+}
+
+function closeLinkModal(){
+  document.getElementById('linkModal').style.display='none';
+  currentLinkVisit=null; selectedOrderIds=new Set();
+}
+
+async function confirmLink(){
+  if(!currentLinkVisit||!selectedOrderIds.size) return;
+  const btn=document.getElementById('linkConfirmBtn');
+  btn.textContent='Отправка...'; btn.disabled=true;
+  try{
+    const r=await fetch(SCRIPT_URL,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:'linkVisit',visitKey:currentLinkVisit.visitKey,orderIds:[...selectedOrderIds]})
+    });
+    const j=await r.json();
+    if(j.success){
+      closeLinkModal();
+      await loadUnmatched();
+      // Show success
+      document.getElementById('linkContent').insertAdjacentHTML('afterbegin',
+        `<div style="background:rgba(46,204,113,.1);border:1px solid var(--client);border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:13px;font-weight:600;color:#1a8a4a">✓ Связано успешно! Привязано заказов: ${j.linked}</div>`);
+    } else {
+      alert('Ошибка: '+(j.error||'неизвестная'));
+      btn.textContent='✓ Связать'; btn.disabled=false;
+    }
+  }catch(e){
+    alert('Ошибка соединения');
+    btn.textContent='✓ Связать'; btn.disabled=false;
+  }
+}
+
+function pl(n,one,few,many){
+  if(n%10===1&&n%100!==11)return one;
+  if([2,3,4].includes(n%10)&&![12,13,14].includes(n%100))return few;
+  return many;
+}
 
 // ══════════════════════════════════════════
 // DEMO DATA
