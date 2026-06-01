@@ -974,6 +974,7 @@ function addVisit(){
     night:isNight(),
   };
   visits.push(visit);
+  sendVisitNow(visit);
   pendingOrders=[]; hasOther=false;
   renderPendingOrders();
   operation=null;
@@ -990,6 +991,29 @@ function addVisit(){
   populateOrders();
   saveDraft();
   showToast('✓ Визит записан', 'var(--client)');
+}
+
+// Немедленная отправка визита в Google Sheets (не ждёт закрытия смены)
+function sendVisitNow(visit){
+  if(SCRIPT_URL.includes('YOUR_')) return;
+  const entry={
+    visitor:visit.visitor, operation:visit.operation,
+    orders:visit.orders||[], orderId:visit.orderId||'', orderClient:visit.orderClient||'',
+    orderReturnDate:visit.orderReturnDate||'', orderDelivery:visit.orderDelivery||'',
+    comment:visit.comment||'', date:visit.date||'', time:visit.time, timeAuto:visit.timeAuto,
+    timestamp:visit.ts, night:visit.night?'Ночь':'День'
+  };
+  fetch(SCRIPT_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      action:'addVisit',
+      shiftDate:new Date().toLocaleDateString('ru',{timeZone:'Europe/Moscow'}),
+      shiftStart:shiftStart?shiftStart.toISOString():new Date().toISOString(),
+      shiftEnd:'',
+      worker, isNight:isNight()?'Ночь':'День',
+      totalEntries:visits.length,
+      entry
+    })
+  }).catch(()=>{});
 }
 
 // ── TABLE ──
@@ -1154,6 +1178,7 @@ async function confirmSubmit(){
   stopAutosave();
   stopOrdersRefresh();
   const payload={
+    action:'closeShift',
     shiftDate:new Date().toLocaleDateString('ru',{timeZone:'Europe/Moscow'}),
     shiftStart:shiftStart?shiftStart.toISOString():new Date().toISOString(),
     shiftEnd:new Date().toISOString(),

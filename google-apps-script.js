@@ -102,76 +102,98 @@ function doPost(e) {
     const data = JSON.parse(e.postData.contents);
     const ss   = SpreadsheetApp.getActiveSpreadsheet();
 
-    if (data.isDraft === true) {
+    if (data.isDraft) {
       saveDraft(ss, data);
       return jsonResponse({ success: true, type: 'draft' });
     }
 
     const log = getOrCreateSheet(ss, SHEET_LOG);
-    if (log.getLastRow() === 0) {
-      log.appendRow([
-        'Дата смены','Начало смены (UTC)','Конец смены (UTC)','Кладовщик','День/Ночь','Всего визитов',
-        'Кто приехал','Операция',
-        'Все заказы визита','Кол-во заказов',
-        'Номер заказа','Клиент заказа','Дата возврата','Доставка',
-        'Время визита (МСК)','Время внесения (МСК)','Время суток','Комментарий'
-      ]);
-      log.getRange(1,1,1,18).setBackground('#1A1A1A').setFontColor('#fff').setFontWeight('bold');
-      log.setFrozenRows(1);
+    ensureLogHeader(log);
+
+    // Немедленная запись одного визита (при нажатии "Добавить визит")
+    if (data.action === 'addVisit') {
+      writeEntryToLog(log, data, data.entry);
+      return jsonResponse({ success: true, type: 'visit' });
     }
+
+    // Закрытие смены: удалить ранее записанные строки этой смены, записать заново
+    deleteShiftRows(log, data.shiftStart, data.worker);
 
     const entries = data.entries || [];
     if (!entries.length) {
       log.appendRow([data.shiftDate,data.shiftStart,data.shiftEnd,data.worker,data.isNight,0,'','','',0,'','','','','','','','']);
     } else {
-      entries.forEach(entry => {
-        const entryOrders = entry.orders || [];
-        // Write ONE ROW PER ORDER within the visit so every order gets its own log line
-        // This allows proper status updates for each order
-        if (!entryOrders.length) {
-          // Visit without orders from list
-          log.appendRow([
-            data.shiftDate, data.shiftStart, data.shiftEnd,
-            data.worker, data.isNight, data.totalEntries,
-            visitorLabel(entry.visitor), operationLabel(entry.operation),
-            '', 0, '', '', '', '',
-            entry.time||'', entry.timeAuto||'', entry.night||'', entry.comment||''
-          ]);
-        } else {
-          const allIds = entryOrders.filter(o=>o.id&&o.id!=='__other__').map(o=>o.id).join(', ');
-          const validCount = entryOrders.filter(o=>o.id&&o.id!=='__other__').length;
-          entryOrders.forEach(order => {
-            if (!order.id || order.id === '__other__') {
-              log.appendRow([
-                data.shiftDate, data.shiftStart, data.shiftEnd,
-                data.worker, data.isNight, data.totalEntries,
-                visitorLabel(entry.visitor), operationLabel(entry.operation),
-                allIds, validCount,
-                '(нет в списке)', '', '', '',
-                entry.time||'', entry.timeAuto||'', entry.night||'', entry.comment||''
-              ]);
-            } else {
-              log.appendRow([
-                data.shiftDate, data.shiftStart, data.shiftEnd,
-                data.worker, data.isNight, data.totalEntries,
-                visitorLabel(entry.visitor), operationLabel(entry.operation),
-                allIds, validCount,
-                order.id, order.client||'', order.returnDate||'', order.delivery||'',
-                entry.time||'', entry.timeAuto||'', entry.night||'', entry.comment||''
-              ]);
-            }
-          });
-        }
-      });
+      entries.forEach(entry => writeEntryToLog(log, data, entry));
     }
 
-    // Update statuses for ALL orders in this submission
     updateOrderStatuses(ss, entries);
     clearDraft(ss, data.worker);
     return jsonResponse({ success: true, rows: entries.length });
 
   } catch (err) {
     return jsonResponse({ success: false, error: err.toString() });
+  }
+}
+
+function ensureLogHeader(log) {
+  if (log.getLastRow() === 0) {
+    log.appendRow([
+      'Дата смены','Начало смены (UTC)','Конец смены (UTC)','Кладовщик','День/Ночь','Всего визитов',
+      'Кто приехал','Операция',
+      'Все заказы визита','Кол-во заказов',
+      'Номер заказа','Клиент заказа','Дата возврата','Доставка',
+      'Время визита (МСК)','Время внесения (МСК)','Время суток','Комментарий'
+    ]);
+    log.getRange(1,1,1,18).setBackground('#1A1A1A').setFontColor('#fff').setFontWeight('bold');
+    log.setFrozenRows(1);
+  }
+}
+
+function writeEntryToLog(log, data, entry) {
+  const entryOrders = entry.orders || [];
+  if (!entryOrders.length) {
+    log.appendRow([
+      data.shiftDate, data.shiftStart, data.shiftEnd||'',
+      data.worker, data.isNight, data.totalEntries||0,
+      visitorLabel(entry.visitor), operationLabel(entry.operation),
+      '', 0, '', '', '', '',
+      entry.time||'', entry.timeAuto||'', entry.night||'', entry.comment||''
+    ]);
+    return;
+  }
+  const allIds     = entryOrders.filter(o=>o.id&&o.id!=='__other__').map(o=>o.id).join(', ');
+  const validCount = entryOrders.filter(o=>o.id&&o.id!=='__other__').length;
+  entryOrders.forEach(order => {
+    if (!order.id || order.id === '__other__') {
+      log.appendRow([
+        data.shiftDate, data.shiftStart, data.shiftEnd||'',
+        data.worker, data.isNight, data.totalEntries||0,
+        visitorLabel(entry.visitor), operationLabel(entry.operation),
+        allIds, validCount, '(нет в списке)', '', '', '',
+        entry.time||'', entry.timeAuto||'', entry.night||'', entry.comment||''
+      ]);
+    } else {
+      log.appendRow([
+        data.shiftDate, data.shiftStart, data.shiftEnd||'',
+        data.worker, data.isNight, data.totalEntries||0,
+        visitorLabel(entry.visitor), operationLabel(entry.operation),
+        allIds, validCount, order.id, order.client||'', order.returnDate||'', order.delivery||'',
+        entry.time||'', entry.timeAuto||'', entry.night||'', entry.comment||''
+      ]);
+    }
+  });
+}
+
+// Удаляет все строки лога принадлежащие данной смене (по shiftStart + worker)
+// Вызывается при закрытии смены чтобы не дублировать визиты, записанные по одному
+function deleteShiftRows(log, shiftStart, worker) {
+  if (log.getLastRow() < 2) return;
+  const vals = log.getRange(2, 1, log.getLastRow()-1, 4).getValues();
+  for (let i = vals.length-1; i >= 0; i--) {
+    // col B (index 1) = shiftStart, col D (index 3) = worker
+    if (vals[i][1] === shiftStart && vals[i][3] === worker) {
+      log.deleteRow(i+2);
+    }
   }
 }
 

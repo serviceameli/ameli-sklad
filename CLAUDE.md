@@ -197,3 +197,8 @@ https://script.google.com/macros/s/AKfycbxr_mDm8i8snxu-hEr-wP16LubT44_GB-r1Zohfx
 3. **После изменения Apps Script** — всегда новое развёртывание, URL меняется, нужно обновить `config.js`.
 4. **`no-cors` режим** — основные POST-запросы используют `mode: 'no-cors'`, ответ не читается. Только `linkVisit` использует обычный fetch и ждёт ответа.
 5. **GitHub Pages** — файлы опубликованы, ссылки вида `https://serviceameli.github.io/ameli-sklad/warehouse-staff.html`.
+
+## Инструкции для Claude Code
+
+После каждого изменения файлов выполняй:
+git add . && git commit -m "краткое описание изменений" && git push
