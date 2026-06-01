@@ -55,14 +55,17 @@ function getWorkerDraft(workerName) {
 function getProcessedOrderIds() {
   const ss  = SpreadsheetApp.getActiveSpreadsheet();
   const log = ss.getSheetByName(SHEET_LOG);
-  if (!log || log.getLastRow() < 2) return { issued: [], returned: [] };
+  if (!log || log.getLastRow() < 2) return { issued: [], returned: [], issuedBy: {}, returnedBy: {} };
 
-  const rows = log.getRange(2, 1, log.getLastRow()-1, 9).getValues(); // читаем только нужные колонки
+  const rows = log.getRange(2, 1, log.getLastRow()-1, 9).getValues();
 
-  const issued   = new Set();
-  const returned = new Set();
+  const issued     = new Set();
+  const returned   = new Set();
+  const issuedBy   = {};  // orderId → workerName
+  const returnedBy = {};
 
   rows.forEach(r => {
+    const workerName   = r[3] ? r[3].toString().trim() : '';
     const operation    = r[7] ? r[7].toString().trim() : '';
     const allOrdersStr = r[8] ? r[8].toString().trim() : '';
     const orderIds = allOrdersStr
@@ -72,17 +75,16 @@ function getProcessedOrderIds() {
 
     if (!orderIds.length) return;
 
-    // Все варианты операций (текущие и старые) для совместимости с ранее записанными строками
     const isIssue  = ['Выдача','Выдача и возврат','Выдача (наш)','Выдача+Возврат (наш)','Получение (наш)','Получение+Возврат'].includes(operation);
     const isReturn = ['Возврат','Выдача и возврат','Возврат (наш)','Выдача+Возврат (наш)','Получение+Возврат'].includes(operation);
 
     orderIds.forEach(id => {
-      if (isIssue)  issued.add(id);
-      if (isReturn) returned.add(id);
+      if (isIssue)  { issued.add(id);   issuedBy[id]   = workerName; }
+      if (isReturn) { returned.add(id); returnedBy[id] = workerName; }
     });
   });
 
-  return { issued: [...issued], returned: [...returned] };
+  return { issued: [...issued], returned: [...returned], issuedBy, returnedBy };
 }
 
 // Отладка — запустите вручную если processedToday пустой

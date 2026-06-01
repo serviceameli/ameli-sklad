@@ -250,6 +250,7 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
 .oc-status.returned{background:rgba(46,204,113,.15);color:#1a8a4a}
 .oc-client{font-size:12px;font-weight:600;color:var(--text);margin-bottom:3px}
 .oc-meta{display:flex;gap:8px;font-size:10px;color:var(--muted);flex-wrap:wrap}
+.oc-worker{color:var(--client);font-weight:600;margin-left:auto}
 .sec-lbl{font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--light);margin:10px 0 6px}
 
 /* ── SUCCESS ── */
@@ -605,6 +606,8 @@ let autosaveTimer=null, formOpen=true, currentShiftTab='add';
 let hasOther=false;
 let serverIssuedToday   = new Set();
 let serverReturnedToday = new Set();
+let serverIssuedBy   = {};  // orderId → workerName
+let serverReturnedBy = {};
 
 // Ключ localStorage зависит от кладовщика — чтобы у каждого своё хранилище
 function draftKey(){ return worker ? 'wh_draft_'+worker.replace(/\s+/g,'_') : 'wh_draft'; }
@@ -758,6 +761,8 @@ async function loadData(workerParam){
     workers=j.workers||[]; orders=j.orders||[];
     serverIssuedToday   = new Set(j.processedOrders?.issued   || []);
     serverReturnedToday = new Set(j.processedOrders?.returned || []);
+    serverIssuedBy   = j.processedOrders?.issuedBy   || {};
+    serverReturnedBy = j.processedOrders?.returnedBy || {};
     return j.draft || null; // черновик этого кладовщика с сервера
   }catch(e){
     workers=[]; // имена берутся только из Google Sheets
@@ -1121,15 +1126,17 @@ function getEffectiveOrderType(o, issuedIds, returnedIds){
 function getSessionStatuses(){
   const issuedIds   = new Set(serverIssuedToday);
   const returnedIds = new Set(serverReturnedToday);
+  const issuedBy    = {...serverIssuedBy};
+  const returnedBy  = {...serverReturnedBy};
   // Добавляем из текущей сессии
   visits.forEach(v=>{
     (v.orders||[]).forEach(o=>{
       if(!o.id||o.id==='__other__') return;
-      if(['issue','pickup'].includes(v.operation))   issuedIds.add(o.id);
-      if(['return','dropoff','both'].includes(v.operation)) returnedIds.add(o.id);
+      if(['issue','pickup'].includes(v.operation))   { issuedIds.add(o.id);   issuedBy[o.id]   = worker; }
+      if(['return','dropoff','both'].includes(v.operation)) { returnedIds.add(o.id); returnedBy[o.id] = worker; }
     });
   });
-  return {issuedIds, returnedIds};
+  return {issuedIds, returnedIds, issuedBy, returnedBy};
 }
 
 function onOrderChange(){
@@ -1433,10 +1440,10 @@ function updateOrdersBar(){
 
 // ── ORDER CARDS ──
 function renderOrderCards(){
-  const {issuedIds,returnedIds}=getSessionStatuses();
+  const {issuedIds,returnedIds,issuedBy,returnedBy}=getSessionStatuses();
   const display=orders.map(o=>{
     const eff=getEffectiveOrderType(o,issuedIds,returnedIds);
-    return{...o, eff};
+    return{...o, eff, issuedBy:issuedBy[o.id]||null, returnedBy:returnedBy[o.id]||null};
   });
   const oc=display.filter(o=>o.overdue&&o.eff!=='done').length;
   const pc=display.filter(o=>!o.overdue&&(o.eff==='issue'||o.eff==='return')).length;
@@ -1488,10 +1495,19 @@ function orderCard(o, modifier){
   const cls=locked?'return-due':sameDayIssued?'issued':eff==='done'&&isDoneReturn?'returned':eff==='done'?'issued':eff==='return'?'return-due':isOverdue?'overdue':'pending';
   const txt=locked?'⏳ Сначала выдайте':sameDayIssued?'✓ Выдан · ↩ возврат сегодня':eff==='done'&&isDoneReturn?'✓ Возвращён':eff==='done'?'✓ Выдан':eff==='return'?'🔄 К возврату':isOverdue?'🔴 Просрочен':'⏳ Ожидает';
   const opacity=locked?'opacity:0.45;':'';
+  const workerHint = sameDayIssued
+    ? (o.issuedBy ? `<span class="oc-worker">👤 ${o.issuedBy}</span>` : '')
+    : eff==='done' && isDoneReturn && o.returnedBy
+      ? `<span class="oc-worker">👤 ${o.returnedBy}</span>`
+    : eff==='done' && o.issuedBy
+      ? `<span class="oc-worker">👤 ${o.issuedBy}</span>`
+    : eff==='return' && o.issuedBy
+      ? `<span class="oc-worker">👤 выдал: ${o.issuedBy}</span>`
+    : '';
   return`<div class="order-card ${cls}" style="${opacity}">
     <div class="oc-top"><span class="oc-id">${o.id}</span><span class="oc-status ${cls}">${txt}</span></div>
     <div class="oc-client">${o.client||'—'}</div>
-    <div class="oc-meta"><span>📅 возврат ${o.returnDate||'—'}</span><span>${o.delivery?.includes('Наш')?'🚛':'🚶'} ${o.delivery||'—'}</span></div>
+    <div class="oc-meta"><span>📅 возврат ${o.returnDate||'—'}</span><span>${o.delivery?.includes('Наш')?'🚛':'🚶'} ${o.delivery||'—'}</span>${workerHint}</div>
   </div>`;
 }
 
