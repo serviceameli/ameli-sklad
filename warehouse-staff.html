@@ -599,15 +599,25 @@ async function init(){
   document.getElementById('loadingScr').style.display='none';
 
   if(urlWorker){
-    // Ищем по точному совпадению, потом по trim на случай лишних пробелов
     const found = workers.find(w=>w.name.trim()===urlWorker.trim());
     if(found){
       worker = found.name;
       window._serverDraft = serverDraft;
-      showWelcomeScreen(found);
+      // Есть открытая смена? → сразу в смену, минуя приветствие
+      const hasDraft = checkForDraft(serverDraft);
+      if(hasDraft){
+        // restoreBanner уже показан — показываем экран выбора с кнопкой восстановить
+        document.querySelectorAll('.wbtn').forEach(b=>{
+          if(b.querySelector('.wname')?.textContent===worker) b.classList.add('sel');
+        });
+        document.getElementById('startBtn').disabled=false;
+        showScreen('s-worker');
+      } else {
+        // Смена закрыта → приветственный экран
+        showWelcomeScreen(found);
+      }
       return;
     } else {
-      // Имя не найдено в списке — показываем выбор кладовщика
       showScreen('s-worker');
       return;
     }
