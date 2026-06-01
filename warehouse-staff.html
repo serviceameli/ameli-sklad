@@ -983,6 +983,8 @@ function populateOrders(){
 
   const toIssue  = orders.filter(o=>!o.overdue && getEffectiveOrderType(o,issuedIds,returnedIds)==='issue');
   const toReturn = orders.filter(o=>!o.overdue && getEffectiveOrderType(o,issuedIds,returnedIds)==='return');
+  // sameDay заказы которые ещё не выдали — показываем в "К возврату" как заблокированные
+  const sameDayPending = orders.filter(o=>!o.overdue && o.sameDay && getEffectiveOrderType(o,issuedIds,returnedIds)==='issue');
   const overdue  = orders.filter(o=>o.overdue  && getEffectiveOrderType(o,issuedIds,returnedIds)!=='done');
 
   // Build tap-list
@@ -995,11 +997,12 @@ function populateOrders(){
   }
   if(toIssue.length){
     html+=`<div class="otap-sep">📦 К выдаче</div>`;
-    html+=toIssue.map(o=>tapRow(o,'issue')).join('');
+    html+=toIssue.map(o=>tapRow(o,'issue',false,'issue')).join('');
   }
-  if(toReturn.length){
+  if(toReturn.length||sameDayPending.length){
     html+=`<div class="otap-sep">🔄 К возврату</div>`;
-    html+=toReturn.map(o=>tapRow(o,'ret')).join('');
+    html+=sameDayPending.map(o=>tapRow(o,'ret',true)).join('');
+    html+=toReturn.map(o=>tapRow(o,'ret',false,'return')).join('');
   }
   html+=`<div class="otap otap-other" onclick="tapOrder('__other__')">
     <div class="otap-left"><div class="otap-id">⚠️ Нет в списке</div></div>
@@ -1010,21 +1013,25 @@ function populateOrders(){
   updateTapSelections();
 }
 
-function tapRow(o, badgeCls){
+function tapRow(o, badgeCls, locked, forceType){
   const label=badgeCls==='issue'?'Выдача':badgeCls==='ret'?'Возврат':'🔴 Просрочен';
-  return `<div class="otap" id="otap-${o.id}" onclick="tapOrder('${o.id}')">
+  const rowId=locked?`otap-ret-${o.id}`:`otap-${o.id}`;
+  const chkId=locked?`otap-chk-ret-${o.id}`:`otap-chk-${o.id}`;
+  const clickAttr=locked?'style="opacity:0.4;pointer-events:none"':`onclick="tapOrder('${o.id}'${forceType?`,'${forceType}'`:''})"`;
+  const hint=locked?`<span style="font-size:10px;color:#888;margin-left:4px">— сначала выдайте</span>`:'';
+  return `<div class="otap" id="${rowId}" ${clickAttr}>
     <div class="otap-left">
-      <div class="otap-id">${o.id}</div>
+      <div class="otap-id">${o.id}${hint}</div>
       <div class="otap-client">${o.client||''}</div>
     </div>
     <div style="display:flex;align-items:center;gap:7px">
       <span class="otap-badge ${badgeCls}">${label}</span>
-      <div class="otap-check" id="otap-chk-${o.id}"></div>
+      <div class="otap-check" id="${chkId}"></div>
     </div>
   </div>`;
 }
 
-function tapOrder(id){
+function tapOrder(id, forceType){
   const already=pendingOrders.find(o=>o.id===id);
   if(already){
     // deselect
@@ -1037,9 +1044,17 @@ function tapOrder(id){
     hasOther=true;
   } else {
     const found=orders.find(o=>o.id===id);
+    // Для sameDay: берём эффективный тип из текущей сессии, а не статичный o.type
+    let effectiveType = found?.type || null;
+    if(found?.sameDay && !forceType){
+      const {issuedIds,returnedIds}=getSessionStatuses();
+      effectiveType=getEffectiveOrderType(found,issuedIds,returnedIds);
+      if(effectiveType==='done') effectiveType='return';
+    }
+    if(forceType) effectiveType=forceType;
     order=found
-      ?{id:found.id,client:found.client||'',type:found.type||null,returnDate:found.returnDate||'',delivery:found.delivery||''}
-      :{id,client:'',type:null};
+      ?{id:found.id,client:found.client||'',type:effectiveType,sameDay:found.sameDay||false,returnDate:found.returnDate||'',delivery:found.delivery||''}
+      :{id,client:'',type:forceType||null};
   }
   pendingOrders.push(order);
   renderPendingOrders();
@@ -1139,9 +1154,11 @@ function onOrderChange(){
     document.getElementById('oi-return').textContent=o.returnDate||'—';
     document.getElementById('oi-delivery').textContent=o.delivery||'—';
     info.classList.add('show');
-    // Auto-set operation from order type
+    // Auto-set operation from order type (sameDay: эффективный тип из сессии)
     if(visitor){
-      const tOp=o.type==='issue'?'issue':'return';
+      let effT=o.type;
+      if(o.sameDay){const {issuedIds,returnedIds}=getSessionStatuses();const e=getEffectiveOrderType(o,issuedIds,returnedIds);effT=e==='done'?'return':e;}
+      const tOp=effT==='issue'?'issue':'return';
       const valid=OPS[visitor]||[];
       if(valid.find(op=>op.id===tOp)){
         operation=tOp;
@@ -1166,8 +1183,14 @@ function addOrderToVisit(){
   } else {
     // Find full order object from loaded orders list
     const found = orders.find(o => o.id === id);
+    let effType = found?.type || null;
+    if(found?.sameDay){
+      const {issuedIds,returnedIds}=getSessionStatuses();
+      const e=getEffectiveOrderType(found,issuedIds,returnedIds);
+      effType = e==='done' ? 'return' : e;
+    }
     order = found
-      ? {id: found.id, client: found.client||'', type: found.type||null, returnDate: found.returnDate||'', delivery: found.delivery||''}
+      ? {id: found.id, client: found.client||'', type: effType, sameDay: found.sameDay||false, returnDate: found.returnDate||'', delivery: found.delivery||''}
       : {id, client:'', type:null};
   }
 
@@ -1226,9 +1249,11 @@ function getEffectiveOperation(){
 
   if (!listOrders.length) return operation || null;
 
-  // Count issue vs return types among list orders
-  const issueCount  = listOrders.filter(o => o.type === 'issue').length;
-  const returnCount = listOrders.filter(o => o.type === 'return').length;
+  // Count issue vs return types among list orders (sameDay: берём эффективный тип из сессии)
+  const {issuedIds:_iids,returnedIds:_rids}=getSessionStatuses();
+  function _effType(o){ return o.sameDay?getEffectiveOrderType(o,_iids,_rids):o.type; }
+  const issueCount  = listOrders.filter(o => _effType(o) === 'issue').length;
+  const returnCount = listOrders.filter(o => _effType(o) === 'return').length;
 
   if (issueCount > 0 && returnCount === 0) return 'issue';
   if (returnCount > 0 && issueCount === 0) return 'return';
