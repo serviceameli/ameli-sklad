@@ -1079,7 +1079,7 @@ function updateTapSelections(){
 let ordersRefreshTimer=null;
 function startOrdersRefresh(){
   stopOrdersRefresh();
-  ordersRefreshTimer=setInterval(refreshOrdersFromServer, 60000);
+  ordersRefreshTimer=setInterval(refreshOrdersFromServer, 15000);
 }
 function stopOrdersRefresh(){ if(ordersRefreshTimer){clearInterval(ordersRefreshTimer);ordersRefreshTimer=null;} }
 
