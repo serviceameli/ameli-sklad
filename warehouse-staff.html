@@ -747,7 +747,7 @@ function showToast(msg, color){
 // ── LOAD ──
 async function loadData(workerParam){
   if(SCRIPT_URL.includes('YOUR_')){
-    workers=[{name:'Оля',pin:'1234'},{name:'Тамилла',pin:'1234'},{name:'Максим',pin:'1234'}];
+    workers=[]; // имена берутся только из Google Sheets
     orders=demoOrders();
     return null;
   }
@@ -760,7 +760,7 @@ async function loadData(workerParam){
     serverReturnedToday = new Set(j.processedOrders?.returned || []);
     return j.draft || null; // черновик этого кладовщика с сервера
   }catch(e){
-    workers=[{name:'Оля',pin:'1234'},{name:'Тамилла',pin:'1234'},{name:'Максим',pin:'1234'}];
+    workers=[]; // имена берутся только из Google Sheets
     orders=[];
     return null;
   }

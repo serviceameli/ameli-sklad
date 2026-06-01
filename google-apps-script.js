@@ -219,11 +219,12 @@ function deleteShiftRows(log, shiftStart, worker) {
 function getWorkers() {
   const ss    = SpreadsheetApp.getActiveSpreadsheet();
   const sheet = ss.getSheetByName(SHEET_WORKERS);
-  if (!sheet || sheet.getLastRow() < 2) {
-    return ['Оля','Тамилла','Максим','Гоша','Алевтина','Наташа'].map(n=>({name:n}));
-  }
-  return sheet.getRange(2,1,sheet.getLastRow()-1,2).getValues()
-    .filter(r=>r[0]).map(r=>({name:r[0].toString().trim(), pin:r[1]?r[1].toString().trim():''}));
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  // Колонки: A = Имя, B = PIN, C = Ссылка, D = Активен (да/нет)
+  return sheet.getRange(2,1,sheet.getLastRow()-1,4).getValues()
+    .filter(r=>r[0])
+    .filter(r=>r[3]===''||r[3].toString().toLowerCase()!=='нет') // фильтруем неактивных
+    .map(r=>({name:r[0].toString().trim(), pin:r[1]?r[1].toString().trim():''}));
 }
 
 // ════════════════════════════════════
@@ -434,9 +435,9 @@ function setupSheets() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const ws = getOrCreateSheet(ss, SHEET_WORKERS);
   if (ws.getLastRow() === 0) {
-    ws.appendRow(['Имя кладовщика']);
-    ws.getRange(1,1).setBackground('#1A1A1A').setFontColor('#fff').setFontWeight('bold');
-    ['Оля','Тамилла','Максим','Гоша','Алевтина','Наташа'].forEach(n => ws.appendRow([n]));
+    ws.appendRow(['Имя кладовщика','PIN','Ссылка','Активен']);
+    ws.getRange(1,1,1,4).setBackground('#1A1A1A').setFontColor('#fff').setFontWeight('bold');
+    // Имена добавляйте вручную в таблицу — не храним их в коде
   }
   getOrCreateSheet(ss, SHEET_LOG);
   getOrCreateSheet(ss, SHEET_DRAFTS);
