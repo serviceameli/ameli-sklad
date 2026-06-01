@@ -548,12 +548,13 @@ async function init(){
     const found = workers.find(w=>w.name===urlWorker);
     if(found){
       worker = found.name;
-      // Уже авторизован на этом устройстве?
-      if(localStorage.getItem(authKey(worker))==='1'){
-        afterAuth();
-      } else {
-        showPinScreen(found);
-      }
+      // PIN ОТКЛЮЧЁН — afterAuth сразу без проверки
+      // if(localStorage.getItem(authKey(worker))==='1'){
+      //   afterAuth();
+      // } else {
+      //   showPinScreen(found);
+      // }
+      afterAuth();
       return;
     }
   }
@@ -792,11 +793,11 @@ function selWorker(name,el){
   // PIN спросим только при первом нажатии Start
 }
 function startShift(){
-  // Если не авторизован на этом устройстве — сначала PIN
-  if(worker && localStorage.getItem(authKey(worker))!=='1'){
-    const workerObj = workers.find(w=>w.name===worker);
-    if(workerObj){ showPinScreen(workerObj); return; }
-  }
+  // PIN ОТКЛЮЧЁН
+  // if(worker && localStorage.getItem(authKey(worker))!=='1'){
+  //   const workerObj = workers.find(w=>w.name===worker);
+  //   if(workerObj){ showPinScreen(workerObj); return; }
+  // }
   shiftStart=new Date();
   document.getElementById('shiftWho').innerHTML=worker+`<span>· ${nowTime()} МСК</span>`;
   updateShiftInfoCard();
