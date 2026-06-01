@@ -573,9 +573,9 @@ async function loadData(){
       const r=await fetch(SCRIPT_URL+'?action=getData&t='+Date.now());
       const j=await r.json();
       workers=j.workers||[]; orders=j.orders||[];
-      // Сохраняем что уже обработано сегодня из лога
-      serverIssuedToday   = new Set(j.processedToday?.issued   || []);
-      serverReturnedToday = new Set(j.processedToday?.returned || []);
+      // processedOrders — какие заказы уже выданы/возвращены согласно логу визитов
+      serverIssuedToday   = new Set(j.processedOrders?.issued   || []);
+      serverReturnedToday = new Set(j.processedOrders?.returned || []);
     }catch(e){
       workers=[{name:'Оля'},{name:'Тамилла'},{name:'Максим'},{name:'Гоша'},{name:'Алевтина'},{name:'Наташа'}];
       orders=[];
@@ -783,8 +783,8 @@ async function refreshOrdersFromServer(){
     const j=await r.json();
     if(j.orders){
       orders=j.orders;
-      serverIssuedToday   = new Set(j.processedToday?.issued   || []);
-      serverReturnedToday = new Set(j.processedToday?.returned || []);
+      serverIssuedToday   = new Set(j.processedOrders?.issued   || []);
+      serverReturnedToday = new Set(j.processedOrders?.returned || []);
       populateOrders();
       updateOrdersBar();
       renderOrderCards();
@@ -1177,9 +1177,10 @@ async function confirmSubmit(){
   document.getElementById('ovl').classList.remove('show');
   stopAutosave();
   stopOrdersRefresh();
+  const n2=mskNow(); const mskDateClose=pad(n2.getUTCDate())+'.'+pad(n2.getUTCMonth()+1)+'.'+n2.getUTCFullYear();
   const payload={
     action:'closeShift',
-    shiftDate:new Date().toLocaleDateString('ru',{timeZone:'Europe/Moscow'}),
+    shiftDate:mskDateClose,
     shiftStart:shiftStart?shiftStart.toISOString():new Date().toISOString(),
     shiftEnd:new Date().toISOString(),
     worker, isNight:isNight()?'Ночь':'День',

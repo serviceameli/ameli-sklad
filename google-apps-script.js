@@ -17,7 +17,7 @@ function doGet(e) {
     return jsonResponse({
       workers: getWorkers(),
       orders:  getTodayOrders(),
-      processedToday: getProcessedTodayIds(), // ID заказов уже обработанных сегодня
+      processedOrders: getProcessedOrderIds(), // какие заказы уже выданы/возвращены (из нашего лога)
     });
   }
   if (action === 'getAll') {
@@ -26,33 +26,23 @@ function doGet(e) {
   return jsonResponse({ error: 'Unknown action' });
 }
 
-// Возвращает объект {issued: [...], returned: [...]} с ID заказов
-// которые уже были выданы или возвращены сегодня согласно логу
-function getProcessedTodayIds() {
+// Возвращает {issued:[...], returned:[...]} — ID заказов которые когда-либо
+// были выданы или возвращены согласно нашему логу визитов.
+// Сканируем ВЕСЬ лог без фильтра по дате: ID заказов уникальны,
+// и getTodayOrders всё равно показывает только заказы с датой = сегодня,
+// поэтому «лишних» совпадений быть не может.
+function getProcessedOrderIds() {
   const ss  = SpreadsheetApp.getActiveSpreadsheet();
   const log = ss.getSheetByName(SHEET_LOG);
   if (!log || log.getLastRow() < 2) return { issued: [], returned: [] };
 
-  const tz    = 'Europe/Moscow';
-  const today = Utilities.formatDate(new Date(), tz, 'dd.MM.yyyy');
-  const rows  = log.getRange(2, 1, log.getLastRow()-1, 18).getValues();
+  const rows = log.getRange(2, 1, log.getLastRow()-1, 9).getValues(); // читаем только нужные колонки
 
   const issued   = new Set();
   const returned = new Set();
 
   rows.forEach(r => {
-    // Дата смены в r[0] может быть строкой или объектом Date
-    let shiftDate = '';
-    if (r[0] instanceof Date) {
-      shiftDate = Utilities.formatDate(r[0], tz, 'dd.MM.yyyy');
-    } else {
-      shiftDate = r[0] ? r[0].toString().trim() : '';
-    }
-    if (shiftDate !== today) return;
-
-    const operation = r[7] ? r[7].toString().trim() : '';
-    // Заказ в r[10] = Первый заказ (одна строка на заказ)
-    // Но также проверяем r[8] = Заказы (все) — там через запятую
+    const operation    = r[7] ? r[7].toString().trim() : '';
     const allOrdersStr = r[8] ? r[8].toString().trim() : '';
     const orderIds = allOrdersStr
       .split(',')
@@ -113,6 +103,7 @@ function doPost(e) {
     // Немедленная запись одного визита (при нажатии "Добавить визит")
     if (data.action === 'addVisit') {
       writeEntryToLog(log, data, data.entry);
+      updateOrderStatuses(ss, [data.entry]); // обновляем статус для менеджеров
       return jsonResponse({ success: true, type: 'visit' });
     }
 
@@ -215,11 +206,12 @@ function getWorkers() {
 
 // ════════════════════════════════════
 //  ORDERS TODAY
-//  Логика: статус определяется ТОЛЬКО по датам
-//  - issueDate = сегодня → показываем как «К выдаче»
-//  - returnDate = сегодня (и issueDate ≠ сегодня) → показываем как «К возврату»
-//  - все остальные дни → не показываем вообще
-//  Статус из таблицы сайта ИГНОРИРУЕМ
+//  Показываем заказ ТОЛЬКО по датам:
+//    issueDate == сегодня  → тип 'issue'  (к выдаче)
+//    returnDate == сегодня → тип 'return' (к возврату)
+//  ВАЖНО: колонка «Статус» из листа заказов (G) — это данные для менеджеров сайта,
+//  наша система её НЕ читает и НЕ использует для логики.
+//  Кто выдан/возвращён — определяем только из нашего лога визитов (getProcessedOrderIds).
 // ════════════════════════════════════
 function getTodayOrders() {
   const ss    = SpreadsheetApp.getActiveSpreadsheet();
@@ -234,7 +226,6 @@ function getTodayOrders() {
   data.forEach(r => {
     if (!r[0]) return;
     const orderId    = r[0].toString().trim();
-    const siteStatus = r[6].toString().trim();
     const issueDate  = r[2] ? Utilities.formatDate(parseDate(r[2]), tz, 'dd.MM.yyyy') : '';
     const returnDate = r[4] ? Utilities.formatDate(parseDate(r[4]), tz, 'dd.MM.yyyy') : '';
     const worker     = r[19] ? r[19].toString().trim() : '';
@@ -243,27 +234,18 @@ function getTodayOrders() {
     const returnTime = parseTimeRange(r[5]);
 
     if (issueDate === today) {
-      // Выдача сегодня → показываем к выдаче, статус всегда pending
       result.push({
         id: orderId, client: r[16].toString().trim(), company: r[18].toString().trim(),
         issueDate, issueTime, returnDate, returnTime,
-        delivery, worker,
-        status: 'pending',  // статус из сайта не используем
-        siteStatus,
-        type: 'issue'
+        delivery, worker, type: 'issue'
       });
     } else if (returnDate === today && issueDate !== today) {
-      // Возврат сегодня (заказ уже у клиента) → показываем к возврату
       result.push({
         id: orderId, client: r[16].toString().trim(), company: r[18].toString().trim(),
         issueDate, issueTime, returnDate, returnTime,
-        delivery, worker,
-        status: 'pending',  // статус из сайта не используем
-        siteStatus,
-        type: 'return'
+        delivery, worker, type: 'return'
       });
     }
-    // Все остальные случаи — не показываем
   });
   return result;
 }
