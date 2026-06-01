@@ -16,10 +16,18 @@ function doGet(e) {
   const workerName = e.parameter.worker ? decodeURIComponent(e.parameter.worker) : null;
 
   if (action === 'getData') {
+    const processedOrders = getProcessedOrderIds();
+    const issuedSet   = new Set(processedOrders.issued);
+    const returnedSet = new Set(processedOrders.returned);
+    const todayOrders    = getTodayOrders();
+    const overdueOrders  = getOverdueOrders(issuedSet, returnedSet);
+    // Объединяем: сегодняшние приоритетнее (уже есть в todayOrders — не дублируем)
+    const todayIds = new Set(todayOrders.map(o => o.id));
+    const orders = [...todayOrders, ...overdueOrders.filter(o => !todayIds.has(o.id))];
     const resp = {
       workers:        getWorkers(),
-      orders:         getTodayOrders(),
-      processedOrders: getProcessedOrderIds(),
+      orders,
+      processedOrders,
     };
     // Если передан worker — добавляем его черновик (для восстановления смены с любого устройства)
     if (workerName) {
@@ -280,6 +288,52 @@ function getTodayOrders() {
       });
     }
   });
+  return result;
+}
+
+// ════════════════════════════════════
+//  OVERDUE ORDERS
+//  Заказы прошлых дней, которые не обработали вовремя
+// ════════════════════════════════════
+function getOverdueOrders(issuedSet, returnedSet) {
+  const ss    = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET_IMPORT);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+
+  const tz    = 'Europe/Moscow';
+  const today = Utilities.formatDate(new Date(), tz, 'dd.MM.yyyy');
+  const data  = sheet.getRange(2, 1, sheet.getLastRow()-1, 20).getValues();
+  const result = [];
+
+  data.forEach(r => {
+    if (!r[0]) return;
+    const orderId    = r[0].toString().trim();
+    const issueDate  = r[2] ? Utilities.formatDate(parseDate(r[2]), tz, 'dd.MM.yyyy') : '';
+    const returnDate = r[4] ? Utilities.formatDate(parseDate(r[4]), tz, 'dd.MM.yyyy') : '';
+    if (!issueDate && !returnDate) return;
+
+    const worker   = r[19] ? r[19].toString().trim() : '';
+    const delivery = worker ? 'Наша доставка' : 'Самовывоз';
+    const client   = r[16] ? r[16].toString().trim() : '';
+
+    const isIssued   = issuedSet.has(orderId);
+    const isReturned = returnedSet.has(orderId);
+
+    // Не выдан вовремя
+    if (issueDate && issueDate < today && !isIssued) {
+      result.push({
+        id: orderId, client, issueDate, returnDate, delivery,
+        type: 'issue', sameDay: issueDate === returnDate, overdue: true
+      });
+    // Выдан, но не возвращён вовремя
+    } else if (returnDate && returnDate < today && isIssued && !isReturned) {
+      result.push({
+        id: orderId, client, issueDate, returnDate, delivery,
+        type: 'return', sameDay: false, overdue: true
+      });
+    }
+  });
+
   return result;
 }
 
