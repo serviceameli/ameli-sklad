@@ -588,7 +588,7 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
 const MSK_OFFSET  = 3;
 const NIGHT_START = 22, NIGHT_END = 9;
 // DRAFT_KEY убран — используем draftKey() который зависит от имени кладовщика
-const AUTOSAVE_INT= 30000;
+const AUTOSAVE_INT= 15000;
 const ICONS = ['👩','👨','🧑','👩','👩','👨'];
 const DAYS_SHORT  = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
 // ═══════════════════
@@ -781,7 +781,7 @@ function demoOrders(){
 
 // ── DRAFT ──
 function saveDraft(){
-  if(!worker||!visits.length) return;
+  if(!worker) return;
   const draft={worker,shiftStart:shiftStart?.toISOString()||null,visits,isNight:isNight()?'Ночь':'День',savedAt:new Date().toISOString()};
   localStorage.setItem(draftKey(),JSON.stringify(draft));
   if(!SCRIPT_URL.includes('YOUR_')){
@@ -953,6 +953,7 @@ function startShift(){
   document.getElementById('timeInp').value=nowTime();
   updateDateLabel();
   refreshOrdersFromServer().then(()=>{ updateOrdersBar(); renderOrderCards(); });
+  saveDraft();
   startAutosave();
   startOrdersRefresh();
 }
