@@ -477,12 +477,10 @@ const ICONS = ['👩','👨','🧑','👩','👩','👨'];
 const DAYS_SHORT  = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
 // ═══════════════════
 
-const OPS_CLIENT = [{id:'issue',label:'📦 Выдача'},{id:'return',label:'🔄 Возврат'}];
-const OPS_YANDEX = [{id:'issue',label:'📦 Выдача'},{id:'return',label:'🔄 Возврат'}];
-const OPS_OUR    = [{id:'pickup',label:'📦 Выдача'},{id:'dropoff',label:'🔄 Возврат'},{id:'both',label:'🔃 Оба'}];
-const OPS = {client:OPS_CLIENT,yandex:OPS_YANDEX,our:OPS_OUR};
+const OPS_ALL = [{id:'issue',label:'📦 Выдача'},{id:'return',label:'🔄 Возврат'}];
+const OPS = {client:OPS_ALL,yandex:OPS_ALL,our:OPS_ALL};
 const VIS_LBL = {client:'Клиент',yandex:'Яндекс',our:'Наш курьер'};
-const OP_LBL  = {issue:'Выдача',return:'Возврат',pickup:'Выдача (наш)',dropoff:'Возврат (наш)',both:'Выдача+Возврат'};
+const OP_LBL  = {issue:'Выдача',return:'Возврат',pickup:'Выдача',dropoff:'Возврат',both:'Выдача и возврат'};
 
 let workers=[], orders=[], visits=[];
 let worker=null, visitor=null, operation=null, shiftStart=null;
@@ -921,16 +919,9 @@ function getEffectiveOperation(){
   const issueCount  = listOrders.filter(o => o.type === 'issue').length;
   const returnCount = listOrders.filter(o => o.type === 'return').length;
 
-  // All same type → use that type
-  if (issueCount > 0 && returnCount === 0) {
-    return visitor === 'our' ? 'pickup' : 'issue';
-  }
-  if (returnCount > 0 && issueCount === 0) {
-    return visitor === 'our' ? 'dropoff' : 'return';
-  }
-  // Mixed (both issue and return in one visit) → "both" for our courier, else "issue" as default
-  if (visitor === 'our') return 'both';
-  return 'issue';
+  if (issueCount > 0 && returnCount === 0) return 'issue';
+  if (returnCount > 0 && issueCount === 0) return 'return';
+  return 'issue'; // mixed — редкий случай, берём первую операцию
 }
 
 function checkReady(){
