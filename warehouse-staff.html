@@ -51,6 +51,21 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
 .rb-yes{flex:2;background:var(--accent);color:var(--black);border:none;border-radius:8px;padding:9px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:700;cursor:pointer}
 .rb-no{flex:1;background:rgba(255,255,255,.08);color:var(--light);border:none;border-radius:8px;padding:9px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:600;cursor:pointer}
 
+/* ── WELCOME SCREEN ── */
+.wlc{padding:48px 24px;text-align:center}
+.wlc-avatar{width:72px;height:72px;border-radius:50%;background:var(--accent-dim);border:3px solid var(--accent);font-size:30px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px}
+.wlc-name{font-size:22px;font-weight:700;color:var(--black);margin-bottom:4px}
+.wlc-sub{font-size:13px;color:var(--muted);margin-bottom:36px}
+.wlc-btns{display:flex;flex-direction:column;gap:11px;max-width:320px;margin:0 auto}
+.wlc-btn{border:none;border-radius:14px;padding:18px;font-family:'Montserrat',sans-serif;font-size:15px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:12px;text-align:left;transition:all .14s}
+.wlc-btn:active{transform:scale(.98)}
+.wlc-btn.primary{background:var(--black);color:#fff}
+.wlc-btn.secondary{background:var(--card);color:var(--text);border:2px solid var(--rule)}
+.wlc-btn-ico{font-size:22px;flex-shrink:0}
+.wlc-btn-txt{display:flex;flex-direction:column;gap:2px}
+.wlc-btn-title{font-size:15px;font-weight:700}
+.wlc-btn-desc{font-size:11px;font-weight:500;opacity:.65}
+
 /* ── PIN SCREEN ── */
 .pin-wrap{padding:32px 20px;text-align:center}
 .pin-name{font-size:22px;font-weight:700;color:var(--black);margin-bottom:4px}
@@ -328,6 +343,31 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
   <div style="font-size:13px;font-weight:600;color:#888">Загрузка заказов...</div>
 </div>
 
+<!-- ═══ WELCOME (персональная ссылка) ═══ -->
+<div class="screen" id="s-welcome">
+  <div class="wlc">
+    <div class="wlc-avatar" id="wlcAvatar">👤</div>
+    <div class="wlc-name" id="wlcName">—</div>
+    <div class="wlc-sub" id="wlcDate">—</div>
+    <div class="wlc-btns">
+      <button class="wlc-btn primary" onclick="welcomeStartShift()">
+        <span class="wlc-btn-ico">🔑</span>
+        <span class="wlc-btn-txt">
+          <span class="wlc-btn-title">Открыть смену</span>
+          <span class="wlc-btn-desc">Начать работу и добавлять визиты</span>
+        </span>
+      </button>
+      <button class="wlc-btn secondary" onclick="welcomeViewOnly()">
+        <span class="wlc-btn-ico">👀</span>
+        <span class="wlc-btn-txt">
+          <span class="wlc-btn-title">Посмотреть заказы</span>
+          <span class="wlc-btn-desc">Статусы заказов без открытия смены</span>
+        </span>
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ PIN ═══ -->
 <div class="screen" id="s-pin">
   <div class="pin-wrap">
@@ -551,25 +591,49 @@ async function init(){
     const found = workers.find(w=>w.name===urlWorker);
     if(found){
       worker = found.name;
-      // Есть незакрытая смена? → предложить восстановить
-      const hasDraft = checkForDraft(serverDraft);
-      if(hasDraft){
-        // restoreBanner показан внутри checkForDraft, показываем экран выбора
-        document.querySelectorAll('.wbtn').forEach(b=>{
-          if(b.querySelector('.wname')?.textContent===worker) b.classList.add('sel');
-        });
-        document.getElementById('startBtn').disabled=false;
-        showScreen('s-worker');
-      } else {
-        // Нет черновика — сразу открываем смену
-        startShift();
-      }
+      // Сохраняем черновик чтобы welcomeStartShift мог его подхватить
+      window._serverDraft = serverDraft;
+      showWelcomeScreen(found);
       return;
     }
   }
 
   // Обычный вход — выбор кладовщика
   showScreen('s-worker');
+}
+
+// ── WELCOME ──
+function showWelcomeScreen(workerObj){
+  const ICONS_MAP = ['👩','👨','🧑','👩','👩','👨'];
+  const idx = workers.indexOf(workerObj);
+  document.getElementById('wlcAvatar').textContent = ICONS_MAP[idx%ICONS_MAP.length]||'👤';
+  document.getElementById('wlcName').textContent = workerObj.name;
+  document.getElementById('wlcDate').textContent =
+    new Date().toLocaleDateString('ru',{weekday:'long',day:'numeric',month:'long',timeZone:'Europe/Moscow'});
+  showScreen('s-welcome');
+}
+
+function welcomeStartShift(){
+  const hasDraft = checkForDraft(window._serverDraft||null);
+  if(hasDraft){
+    // Показываем экран с баннером восстановления
+    document.querySelectorAll('.wbtn').forEach(b=>{
+      if(b.querySelector('.wname')?.textContent===worker) b.classList.add('sel');
+    });
+    document.getElementById('startBtn').disabled=false;
+    showScreen('s-worker');
+  } else {
+    startShift();
+  }
+}
+
+function welcomeViewOnly(){
+  // Режим просмотра — показываем заказы без открытия смены
+  document.getElementById('shiftWho').innerHTML=worker+`<span>· просмотр</span>`;
+  showScreen('s-shift');
+  switchShiftTab('orders');
+  updateOrdersBar();
+  renderOrderCards();
 }
 
 // Moscow time helpers
