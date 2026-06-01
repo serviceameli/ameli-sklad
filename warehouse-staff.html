@@ -1447,6 +1447,8 @@ function renderOrderCards(){
 
   const overdueOrders   = display.filter(o=>o.overdue && o.eff!=='done');
   const pendingIssue    = display.filter(o=>o.eff==='issue' && !o.overdue);
+  // sameDay ещё не выданные — показываем и в "К возврату" (заблокированные)
+  const sameDayLocked   = display.filter(o=>o.sameDay && o.eff==='issue' && !o.overdue);
   const pendingReturn   = display.filter(o=>o.eff==='return' && !o.overdue);
   const done            = display.filter(o=>o.eff==='done');
 
@@ -1459,8 +1461,9 @@ function renderOrderCards(){
     html+=`<div class="sec-lbl">📦 К выдаче</div>`;
     html+=pendingIssue.map(o=>orderCard(o)).join('');
   }
-  if(pendingReturn.length){
+  if(pendingReturn.length||sameDayLocked.length){
     html+=`<div class="sec-lbl">🔄 К возврату</div>`;
+    html+=sameDayLocked.map(o=>orderCard(o,'locked')).join('');
     html+=pendingReturn.map(o=>orderCard(o)).join('');
   }
   if(done.length){
@@ -1471,12 +1474,16 @@ function renderOrderCards(){
   document.getElementById('ordersCards').innerHTML=html;
 }
 
-function orderCard(o){
+function orderCard(o, modifier){
   const eff=o.eff||'issue';
   const isOverdue=o.overdue&&eff!=='done';
-  const cls=eff==='done'&&o.type==='return'?'returned':eff==='done'?'issued':eff==='return'?'return-due':isOverdue?'overdue':'pending';
-  const txt=eff==='done'&&(o.type==='return'||o.sameDay&&o.returnedIds)?'✓ Возвращён':eff==='done'?'✓ Выдан':eff==='return'?'🔄 К возврату':isOverdue?'🔴 Просрочен':'⏳ Ожидает';
-  return`<div class="order-card ${cls}">
+  const locked=modifier==='locked';
+  // для sameDay done: возвращён если eff==='done' и sameDay
+  const isDoneReturn=eff==='done'&&(o.type==='return'||(o.sameDay));
+  const cls=locked?'return-due':eff==='done'&&isDoneReturn?'returned':eff==='done'?'issued':eff==='return'?'return-due':isOverdue?'overdue':'pending';
+  const txt=locked?'⏳ Сначала выдайте':eff==='done'&&isDoneReturn?'✓ Возвращён':eff==='done'?'✓ Выдан':eff==='return'?'🔄 К возврату':isOverdue?'🔴 Просрочен':'⏳ Ожидает';
+  const opacity=locked?'opacity:0.45;':'';
+  return`<div class="order-card ${cls}" style="${opacity}">
     <div class="oc-top"><span class="oc-id">${o.id}</span><span class="oc-status ${cls}">${txt}</span></div>
     <div class="oc-client">${o.client||'—'}</div>
     <div class="oc-meta"><span>📅 возврат ${o.returnDate||'—'}</span><span>${o.delivery?.includes('Наш')?'🚛':'🚶'} ${o.delivery||'—'}</span></div>
