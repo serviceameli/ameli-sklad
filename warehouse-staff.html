@@ -339,87 +339,95 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
     <div class="swho" id="shiftWho">—</div>
     <div class="schange" onclick="goBack()">сменить</div>
   </div>
+
+  <!-- Счётчик заказов — виден всегда -->
+  <div class="orders-bar">
+    <div class="ob-item pen"><div class="ob-n" id="bar-pending">0</div><div class="ob-l">ожид.</div></div>
+    <div class="ob-item iss"><div class="ob-n" id="bar-issued">0</div><div class="ob-l">выдано</div></div>
+    <div class="ob-item ret"><div class="ob-n" id="bar-returned">0</div><div class="ob-l">возвращено</div></div>
+    <div class="ob-item ov"><div class="ob-n" id="bar-overdue">0</div><div class="ob-l">🔴 просроч.</div></div>
+  </div>
+
   <div class="shift-tabs">
-    <div class="stab active" id="stab-log" onclick="switchShiftTab('log')">📋 Журнал смены</div>
+    <div class="stab active" id="stab-add" onclick="switchShiftTab('add')">＋ Визит</div>
     <div class="stab" id="stab-orders" onclick="switchShiftTab('orders')">
       📦 Заказы<span class="stab-badge" id="pendingBadge" style="display:none">0</span>
     </div>
+    <div class="stab" id="stab-shift" onclick="switchShiftTab('shift')">
+      📋 Смена<span class="stab-badge grn" id="visitsBadge" style="display:none">0</span>
+    </div>
   </div>
 
-  <!-- ── LOG TAB ── -->
-  <div class="tabview active" id="tv-log">
-    <!-- orders status bar — compact single row -->
-    <div class="orders-bar">
-      <div class="ob-item pen"><div class="ob-n" id="bar-pending">0</div><div class="ob-l">ожид.</div></div>
-      <div class="ob-item iss"><div class="ob-n" id="bar-issued">0</div><div class="ob-l">выдано</div></div>
-      <div class="ob-item ret"><div class="ob-n" id="bar-returned">0</div><div class="ob-l">возврат</div></div>
-      <div class="ob-item ov"><div class="ob-n" id="bar-overdue">0</div><div class="ob-l">🔴 просроч.</div></div>
-    </div>
-
-    <!-- ADD FORM -->
-    <div class="add-form">
-      <div class="add-form-title">
-        + Добавить визит
-        <span class="add-collapse" id="collapseBtn" onclick="toggleForm()">свернуть ▲</span>
+  <!-- ── ТАБ 1: ДОБАВИТЬ ВИЗИТ ── -->
+  <div class="tabview active" id="tv-add">
+    <div class="add-form" style="border-bottom:none">
+      <div style="margin-bottom:10px">
+        <label class="flbl">Кто приехал</label>
+        <div class="vis-btns">
+          <button class="vbtn c" onclick="setVisitor('client',this)">🧑 Клиент</button>
+          <button class="vbtn y" onclick="setVisitor('yandex',this)">🚕 Курьер Яндекс</button>
+          <button class="vbtn o" onclick="setVisitor('our',this)">🚛 Наш курьер</button>
+        </div>
       </div>
-      <div id="formBody">
-        <!-- Visitor type — vertical large buttons -->
-        <div style="margin-bottom:10px">
-          <label class="flbl">Кто приехал</label>
-          <div class="vis-btns">
-            <button class="vbtn c" onclick="setVisitor('client',this)">🧑 Клиент</button>
-            <button class="vbtn y" onclick="setVisitor('yandex',this)">🚕 Курьер Яндекс</button>
-            <button class="vbtn o" onclick="setVisitor('our',this)">🚛 Наш курьер</button>
-          </div>
-        </div>
 
-        <!-- Orders (multi-tap) -->
-        <div style="margin-bottom:6px">
-          <label class="flbl">Заказы <span style="font-weight:500;letter-spacing:0;text-transform:none;color:var(--muted)">(тапни чтобы выбрать)</span></label>
-          <!-- Selected orders chips -->
-          <div class="added-orders-list" id="addedOrdersList">
-            <span class="ao-empty">Заказы не выбраны</span>
-          </div>
-          <!-- Tap-list of available orders -->
-          <div class="order-tap-list" id="orderTapList"></div>
-          <!-- hidden select kept for JS compatibility -->
-          <select id="orderSel" style="display:none" onchange="onOrderChange()">
-            <option value="">— выберите заказ —</option>
-          </select>
+      <div style="margin-bottom:6px">
+        <label class="flbl">Заказы <span style="font-weight:500;letter-spacing:0;text-transform:none;color:var(--muted)">(тапни чтобы выбрать)</span></label>
+        <div class="added-orders-list" id="addedOrdersList">
+          <span class="ao-empty">Заказы не выбраны</span>
         </div>
+        <div class="order-tap-list" id="orderTapList"></div>
+        <select id="orderSel" style="display:none" onchange="onOrderChange()">
+          <option value="">— выберите заказ —</option>
+        </select>
+      </div>
 
-        <!-- Operation — shown ONLY if "нет в списке" is selected -->
-        <div class="op-section" id="opSection" style="margin-bottom:7px">
-          <label class="flbl">Операция <span style="font-weight:500;letter-spacing:0;text-transform:none;color:var(--muted)">(для «нет в списке»)</span></label>
-          <div class="opg" id="opGroup"></div>
-        </div>
+      <div class="op-section" id="opSection" style="margin-bottom:7px">
+        <label class="flbl">Операция <span style="font-weight:500;letter-spacing:0;text-transform:none;color:var(--muted)">(для «нет в списке»)</span></label>
+        <div class="opg" id="opGroup"></div>
+      </div>
 
-        <!-- Time + Comment + Date (pencil) -->
-        <div class="tc2-row">
-          <div class="field-g">
-            <label class="flbl">Время (МСК)</label>
-            <input class="time-inp" id="timeInp" type="time">
-          </div>
-          <div class="field-g" style="flex:1">
-            <label class="flbl">Комментарий</label>
-            <textarea class="comment-inp" id="commentInp" placeholder="необязательно..."></textarea>
-          </div>
+      <div class="tc2-row">
+        <div class="field-g">
+          <label class="flbl">Время (МСК)</label>
+          <input class="time-inp" id="timeInp" type="time">
         </div>
-        <!-- Date — compact, hidden by default -->
-        <div class="date-compact-row">
-          <span class="date-compact-lbl" id="dateLbl" onclick="toggleDatePicker()">
-            📅 <span id="dateLblText">—</span> ✏️
-          </span>
-          <div class="date-compact-picker" id="datePicker" style="display:none">
-            <select class="date-sel" id="dateInp" onchange="onDateChange()"></select>
-          </div>
+        <div class="field-g" style="flex:1">
+          <label class="flbl">Комментарий</label>
+          <textarea class="comment-inp" id="commentInp" placeholder="необязательно..."></textarea>
         </div>
+      </div>
+      <div class="date-compact-row">
+        <span class="date-compact-lbl" id="dateLbl" onclick="toggleDatePicker()">
+          📅 <span id="dateLblText">—</span> ✏️
+        </span>
+        <div class="date-compact-picker" id="datePicker" style="display:none">
+          <select class="date-sel" id="dateInp" onchange="onDateChange()"></select>
+        </div>
+      </div>
+      <button class="add-btn" id="addBtn" onclick="addVisit()" disabled>＋ Добавить визит</button>
+    </div>
+  </div>
 
-        <button class="add-btn" id="addBtn" onclick="addVisit()" disabled>＋ Добавить визит</button>
+  <!-- ── ТАБ 2: СТАТУСЫ ВСЕХ ЗАКАЗОВ ── -->
+  <div class="tabview" id="tv-orders">
+    <div class="orders-tab-content" style="padding-bottom:20px">
+      <div class="osummary" id="ordersMini"></div>
+      <div id="ordersCards"></div>
+    </div>
+  </div>
+
+  <!-- ── ТАБ 3: СМЕНА ── -->
+  <div class="tabview" id="tv-shift">
+    <!-- Инфо о смене -->
+    <div style="margin:12px 15px 0">
+      <div style="background:var(--card);border:1px solid var(--rule);border-radius:12px;padding:13px 16px">
+        <div style="font-size:9px;font-weight:700;letter-spacing:.17em;text-transform:uppercase;color:var(--muted);margin-bottom:5px">Текущая смена</div>
+        <div id="shiftInfoCard" style="font-size:14px;font-weight:700;color:var(--black)">—</div>
+        <div id="shiftInfoSub" style="font-size:11px;color:var(--muted);margin-top:2px">—</div>
       </div>
     </div>
 
-    <!-- VISITS TABLE -->
+    <!-- Журнал визитов смены -->
     <div class="tarea">
       <div class="tarea-hd">
         Визиты смены
@@ -440,18 +448,6 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
     <div class="sub-footer">
       <button class="sub-btn" id="subBtn" onclick="openModal()">Закрыть смену ✓</button>
       <div class="sub-hint" id="subHint">Визитов за смену: 0</div>
-    </div>
-  </div>
-
-  <!-- ── ORDERS TAB ── -->
-  <div class="tabview" id="tv-orders">
-    <div class="orders-tab-content">
-      <div class="osummary" id="ordersMini"></div>
-      <div id="ordersCards"></div>
-    </div>
-    <div class="sub-footer">
-      <button class="sub-btn" id="subBtn2" onclick="openModal()">Закрыть смену ✓</button>
-      <div class="sub-hint" id="subHint2"></div>
     </div>
   </div>
 </div><!-- /s-shift -->
@@ -485,7 +481,7 @@ const OP_LBL  = {issue:'Выдача',return:'Возврат',pickup:'Выдач
 let workers=[], orders=[], visits=[];
 let worker=null, visitor=null, operation=null, shiftStart=null;
 let pendingOrders=[];
-let autosaveTimer=null, formOpen=true, currentShiftTab='log';
+let autosaveTimer=null, formOpen=true, currentShiftTab='add';
 let hasOther=false;
 // Заказы уже обработанные сегодня (из лога на сервере)
 let serverIssuedToday   = new Set();
@@ -630,9 +626,11 @@ function restoreShift(){
   document.querySelectorAll('.wbtn').forEach(b=>{ if(b.querySelector('.wname')?.textContent===worker)b.classList.add('sel'); });
   document.getElementById('restoreBanner').classList.remove('show');
   document.getElementById('shiftWho').innerHTML=worker+`<span>· восстановлено</span>`;
+  updateShiftInfoCard();
   showScreen('s-shift');
+  switchShiftTab('add');
   pendingOrders=[]; renderPendingOrders();
-  setVisitor('client',document.querySelector('.sbtn.c'));
+  setVisitor('client',document.querySelector('.vbtn.c'));
   document.getElementById('timeInp').value=nowTime();
   renderTable(); updateOrdersBar(); renderOrderCards();
   startAutosave();
@@ -656,7 +654,9 @@ function selWorker(name,el){
 function startShift(){
   shiftStart=new Date();
   document.getElementById('shiftWho').innerHTML=worker+`<span>· ${nowTime()} МСК</span>`;
+  updateShiftInfoCard();
   showScreen('s-shift');
+  switchShiftTab('add');
   pendingOrders=[]; renderPendingOrders();
   setVisitor('client',document.querySelector('.vbtn.c'));
   document.getElementById('timeInp').value=nowTime();
@@ -666,6 +666,14 @@ function startShift(){
   startOrdersRefresh();
 }
 
+function updateShiftInfoCard(){
+  const el=document.getElementById('shiftInfoCard');
+  const sub=document.getElementById('shiftInfoSub');
+  if(!el) return;
+  el.textContent=worker+(shiftStart?` · с ${pad(new Date(shiftStart.getTime()+3*3600000).getUTCHours())+':'+pad(new Date(shiftStart.getTime()+3*3600000).getUTCMinutes())} МСК`:'');
+  if(sub) sub.textContent=isNight()?'🌙 Ночная смена':'☀️ Дневная смена';
+}
+
 // ── SHIFT TABS ──
 function switchShiftTab(tab){
   currentShiftTab=tab;
@@ -673,11 +681,6 @@ function switchShiftTab(tab){
   document.getElementById('stab-'+tab).classList.add('active');
   document.querySelectorAll('.tabview').forEach(v=>v.classList.remove('active'));
   document.getElementById('tv-'+tab).classList.add('active');
-}
-function toggleForm(){
-  formOpen=!formOpen;
-  document.getElementById('formBody').style.display=formOpen?'block':'none';
-  document.getElementById('collapseBtn').textContent=formOpen?'свернуть ▲':'развернуть ▼';
 }
 
 function populateOrders(){
@@ -1064,9 +1067,11 @@ function renderTable(){
   }
   tbody.innerHTML=html;
 
-  document.getElementById('subBtn').disabled=false; document.getElementById('subBtn2').disabled=false;
-  const hint2=`${visits.length} ${pl(visits.length,'визит','визита','визитов')} · готово к отправке`;
-  document.getElementById('subHint').textContent=hint2; document.getElementById('subHint2').textContent=hint2;
+  document.getElementById('subBtn').disabled=false;
+  document.getElementById('subHint').textContent=`${visits.length} ${pl(visits.length,'визит','визита','визитов')} · готово к отправке`;
+  // Бейдж на табе «Смена»
+  const vb=document.getElementById('visitsBadge');
+  if(vb){ vb.textContent=visits.length; vb.style.display=visits.length?'inline-block':'none'; }
 }
 
 function delVisit(i){ visits.splice(i,1); visits.forEach((v,j)=>v.n=j+1); renderTable(); updateOrdersBar(); renderOrderCards(); populateOrders(); saveDraft(); }
@@ -1213,6 +1218,7 @@ function resetAll(){ visits=[];worker=null;visitor=null;operation=null;shiftStar
   stopAutosave(); stopOrdersRefresh();
   document.querySelectorAll('.wbtn').forEach(b=>b.classList.remove('sel'));
   document.getElementById('startBtn').disabled=true;
+  const vb=document.getElementById('visitsBadge'); if(vb) vb.style.display='none';
   renderTable(); updateOrdersBar(); loadData(); showScreen('s-worker'); }
 
 function showScreen(id){ document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active')); document.getElementById('s-success').classList.remove('active'); document.getElementById(id).classList.add('active'); window.scrollTo(0,0); }
