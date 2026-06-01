@@ -295,46 +295,146 @@ function getTodayOrders() {
 //  OVERDUE ORDERS
 //  Заказы прошлых дней, которые не обработали вовремя
 // ════════════════════════════════════
+// ════════════════════════════════════
+//  ПРОСРОЧЕННЫЕ ЗАКАЗЫ
+// ════════════════════════════════════
+
+// Читает просрочку из двух источников:
+// 1. Лист заказы — пока заказ там ещё есть (сегодня или уже ушёл но ещё не убрали)
+// 2. Лог — записи «Просрочен - не выдан» / «Просрочен - не возвращён» + Выдача без Возврата
 function getOverdueOrders(issuedSet, returnedSet) {
-  const ss    = SpreadsheetApp.getActiveSpreadsheet();
+  const ss  = SpreadsheetApp.getActiveSpreadsheet();
+  const tz  = 'Europe/Moscow';
+  const today = Utilities.formatDate(new Date(), tz, 'dd.MM.yyyy');
+  const result = [];
+  const seen   = new Set(); // orderId_type
+
+  // --- 1. Из листа заказы ---
   const sheet = ss.getSheetByName(SHEET_IMPORT);
-  if (!sheet || sheet.getLastRow() < 2) return [];
+  if (sheet && sheet.getLastRow() >= 2) {
+    const data = sheet.getRange(2, 1, sheet.getLastRow()-1, 20).getValues();
+    data.forEach(r => {
+      if (!r[0]) return;
+      const orderId    = r[0].toString().trim();
+      const issueDate  = r[2] ? Utilities.formatDate(parseDate(r[2]), tz, 'dd.MM.yyyy') : '';
+      const returnDate = r[4] ? Utilities.formatDate(parseDate(r[4]), tz, 'dd.MM.yyyy') : '';
+      const client     = r[16] ? r[16].toString().trim() : '';
+      const delivery   = r[19] ? 'Наша доставка' : 'Самовывоз';
+
+      if (issueDate && issueDate < today && !issuedSet.has(orderId) && !seen.has(orderId+'_i')) {
+        result.push({ id:orderId, client, issueDate, returnDate, delivery, type:'issue', sameDay:issueDate===returnDate, overdue:true });
+        seen.add(orderId+'_i');
+      } else if (returnDate && returnDate < today && issuedSet.has(orderId) && !returnedSet.has(orderId) && !seen.has(orderId+'_r')) {
+        result.push({ id:orderId, client, issueDate, returnDate, delivery, type:'return', sameDay:false, overdue:true });
+        seen.add(orderId+'_r');
+      }
+    });
+  }
+
+  // --- 2. Из лога: Просрочен-записи + Выдача без Возврата ---
+  const log = ss.getSheetByName(SHEET_LOG);
+  if (log && log.getLastRow() >= 2) {
+    const rows = log.getRange(2, 1, log.getLastRow()-1, 14).getValues();
+
+    // Собираем сводку по каждому orderId из лога
+    const logMap = {}; // orderId → {issued, returned, returnDate, client, delivery, notIssuedRecorded, notReturnedRecorded}
+    rows.forEach(r => {
+      const op       = r[7]  ? r[7].toString().trim()  : '';
+      const orderId  = r[10] ? r[10].toString().trim() : '';
+      const client   = r[11] ? r[11].toString().trim() : '';
+      const retDate  = r[12] ? r[12].toString().trim() : '';
+      const delivery = r[13] ? r[13].toString().trim() : '';
+      if (!orderId || orderId === '(нет в списке)') return;
+
+      if (!logMap[orderId]) logMap[orderId] = { issued:false, returned:false, returnDate:'', client:'', delivery:'', notIssuedRecorded:false, notReturnedRecorded:false };
+      const m = logMap[orderId];
+
+      const isIssue  = ['Выдача','Выдача и возврат','Выдача (наш)','Выдача+Возврат (наш)','Получение (наш)','Получение+Возврат'].includes(op);
+      const isReturn = ['Возврат','Выдача и возврат','Возврат (наш)','Выдача+Возврат (наш)','Получение+Возврат'].includes(op);
+
+      if (isIssue)  { m.issued   = true; if(retDate)  m.returnDate = retDate; if(client) m.client = client; if(delivery) m.delivery = delivery; }
+      if (isReturn) { m.returned = true; }
+      if (op === 'Просрочен - не выдан')      m.notIssuedRecorded   = true;
+      if (op === 'Просрочен - не возвращён')  m.notReturnedRecorded = true;
+    });
+
+    Object.entries(logMap).forEach(([orderId, m]) => {
+      // Просрочен-запись без последующей Выдачи
+      if (m.notIssuedRecorded && !m.issued && !seen.has(orderId+'_i')) {
+        result.push({ id:orderId, client:m.client, returnDate:m.returnDate, delivery:m.delivery, type:'issue', sameDay:false, overdue:true });
+        seen.add(orderId+'_i');
+      }
+      // Просрочен-запись без последующего Возврата
+      if (m.notReturnedRecorded && !m.returned && !seen.has(orderId+'_r')) {
+        result.push({ id:orderId, client:m.client, returnDate:m.returnDate, delivery:m.delivery, type:'return', sameDay:false, overdue:true });
+        seen.add(orderId+'_r');
+      }
+      // Выдача с просроченным returnDate без Возврата (даже без Просрочен-записи)
+      if (m.issued && !m.returned && m.returnDate && m.returnDate < today && !seen.has(orderId+'_r')) {
+        result.push({ id:orderId, client:m.client, returnDate:m.returnDate, delivery:m.delivery, type:'return', sameDay:false, overdue:true });
+        seen.add(orderId+'_r');
+      }
+    });
+  }
+
+  return result;
+}
+
+// Записывает незакрытые заказы дня в лог как «Просрочен».
+// Запускается триггером в 23:00 МСК ежедневно.
+function recordOverdueOrders() {
+  const ss  = SpreadsheetApp.getActiveSpreadsheet();
+  const log = ss.getSheetByName(SHEET_LOG);
+  const sheet = ss.getSheetByName(SHEET_IMPORT);
+  if (!log || !sheet || sheet.getLastRow() < 2) return;
 
   const tz    = 'Europe/Moscow';
   const today = Utilities.formatDate(new Date(), tz, 'dd.MM.yyyy');
-  const data  = sheet.getRange(2, 1, sheet.getLastRow()-1, 20).getValues();
-  const result = [];
+  const now   = Utilities.formatDate(new Date(), tz, 'HH:mm');
+  const ts    = new Date().toISOString();
 
+  const processed   = getProcessedOrderIds();
+  const issuedSet   = new Set(processed.issued);
+  const returnedSet = new Set(processed.returned);
+
+  // Уже записанные в лог как просроченные — не дублируем
+  const alreadyLogged = new Set();
+  if (log.getLastRow() >= 2) {
+    log.getRange(2, 1, log.getLastRow()-1, 11).getValues().forEach(r => {
+      const op  = r[7]  ? r[7].toString().trim()  : '';
+      const id  = r[10] ? r[10].toString().trim() : '';
+      if (op === 'Просрочен - не выдан')     alreadyLogged.add(id + '_i');
+      if (op === 'Просрочен - не возвращён') alreadyLogged.add(id + '_r');
+    });
+  }
+
+  const data = sheet.getRange(2, 1, sheet.getLastRow()-1, 20).getValues();
   data.forEach(r => {
     if (!r[0]) return;
     const orderId    = r[0].toString().trim();
     const issueDate  = r[2] ? Utilities.formatDate(parseDate(r[2]), tz, 'dd.MM.yyyy') : '';
     const returnDate = r[4] ? Utilities.formatDate(parseDate(r[4]), tz, 'dd.MM.yyyy') : '';
-    if (!issueDate && !returnDate) return;
+    const client     = r[16] ? r[16].toString().trim() : '';
+    const delivery   = r[19] ? 'Наша доставка' : 'Самовывоз';
 
-    const worker   = r[19] ? r[19].toString().trim() : '';
-    const delivery = worker ? 'Наша доставка' : 'Самовывоз';
-    const client   = r[16] ? r[16].toString().trim() : '';
-
-    const isIssued   = issuedSet.has(orderId);
-    const isReturned = returnedSet.has(orderId);
-
-    // Не выдан вовремя
-    if (issueDate && issueDate < today && !isIssued) {
-      result.push({
-        id: orderId, client, issueDate, returnDate, delivery,
-        type: 'issue', sameDay: issueDate === returnDate, overdue: true
-      });
-    // Выдан, но не возвращён вовремя
-    } else if (returnDate && returnDate < today && isIssued && !isReturned) {
-      result.push({
-        id: orderId, client, issueDate, returnDate, delivery,
-        type: 'return', sameDay: false, overdue: true
-      });
+    if (issueDate === today && !issuedSet.has(orderId) && !alreadyLogged.has(orderId+'_i')) {
+      log.appendRow([today, ts, '', 'Система', 'Авто', 0, '', 'Просрочен - не выдан',
+        orderId, 1, orderId, client, returnDate, delivery, now, now, '', '']);
+    }
+    if (returnDate === today && issuedSet.has(orderId) && !returnedSet.has(orderId) && !alreadyLogged.has(orderId+'_r')) {
+      log.appendRow([today, ts, '', 'Система', 'Авто', 0, '', 'Просрочен - не возвращён',
+        orderId, 1, orderId, client, returnDate, delivery, now, now, '', '']);
     }
   });
+}
 
-  return result;
+// Создаёт триггер 23:00 МСК. Запустить один раз вручную.
+function setupOverdueTrigger() {
+  ScriptApp.getProjectTriggers()
+    .filter(t => t.getHandlerFunction() === 'recordOverdueOrders')
+    .forEach(t => ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger('recordOverdueOrders')
+    .timeBased().atHour(23).everyDays(1).inTimezone('Europe/Moscow').create();
 }
 
 // ════════════════════════════════════
