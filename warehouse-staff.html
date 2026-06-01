@@ -981,8 +981,6 @@ function addVisit(){
   document.querySelectorAll('.opb').forEach(b=>b.classList.remove('act','auto'));
   document.getElementById('opSection').classList.remove('show');
   document.getElementById('orderSel').value='';
-  document.getElementById('orderInfo').classList.remove('show');
-  document.getElementById('aoAddBtn').disabled=true;
   document.getElementById('commentInp').value='';
   document.getElementById('timeInp').value=nowTime();
   document.getElementById('dateInp').selectedIndex=0; updateDateLabel();
