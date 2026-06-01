@@ -12,18 +12,39 @@ const SHEET_DRAFTS  = 'drafts';
 //  GET
 // ════════════════════════════════════
 function doGet(e) {
-  const action = e.parameter.action || 'getData';
+  const action     = e.parameter.action || 'getData';
+  const workerName = e.parameter.worker ? decodeURIComponent(e.parameter.worker) : null;
+
   if (action === 'getData') {
-    return jsonResponse({
-      workers: getWorkers(),
-      orders:  getTodayOrders(),
-      processedOrders: getProcessedOrderIds(), // какие заказы уже выданы/возвращены (из нашего лога)
-    });
+    const resp = {
+      workers:        getWorkers(),
+      orders:         getTodayOrders(),
+      processedOrders: getProcessedOrderIds(),
+    };
+    // Если передан worker — добавляем его черновик (для восстановления смены с любого устройства)
+    if (workerName) {
+      resp.draft = getWorkerDraft(workerName);
+    }
+    return jsonResponse(resp);
   }
   if (action === 'getAll') {
     return jsonResponse({ shifts: getAllShifts(), orders: getTodayOrders() });
   }
   return jsonResponse({ error: 'Unknown action' });
+}
+
+// Возвращает черновик конкретного кладовщика из листа drafts, или null
+function getWorkerDraft(workerName) {
+  const ss    = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET_DRAFTS);
+  if (!sheet || sheet.getLastRow() < 2) return null;
+  const vals = sheet.getRange(2, 1, sheet.getLastRow()-1, 4).getValues();
+  for (const r of vals) {
+    if (r[0].toString().trim() === workerName && r[3]) {
+      try { return JSON.parse(r[3].toString()); } catch(e) { return null; }
+    }
+  }
+  return null;
 }
 
 // Возвращает {issued:[...], returned:[...]} — ID заказов которые когда-либо
@@ -201,8 +222,8 @@ function getWorkers() {
   if (!sheet || sheet.getLastRow() < 2) {
     return ['Оля','Тамилла','Максим','Гоша','Алевтина','Наташа'].map(n=>({name:n}));
   }
-  return sheet.getRange(2,1,sheet.getLastRow()-1,1).getValues()
-    .filter(r=>r[0]).map(r=>({name:r[0].toString().trim()}));
+  return sheet.getRange(2,1,sheet.getLastRow()-1,2).getValues()
+    .filter(r=>r[0]).map(r=>({name:r[0].toString().trim(), pin:r[1]?r[1].toString().trim():''}));
 }
 
 // ════════════════════════════════════

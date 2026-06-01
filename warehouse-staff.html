@@ -51,6 +51,20 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
 .rb-yes{flex:2;background:var(--accent);color:var(--black);border:none;border-radius:8px;padding:9px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:700;cursor:pointer}
 .rb-no{flex:1;background:rgba(255,255,255,.08);color:var(--light);border:none;border-radius:8px;padding:9px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:600;cursor:pointer}
 
+/* ── PIN SCREEN ── */
+.pin-wrap{padding:32px 20px;text-align:center}
+.pin-name{font-size:22px;font-weight:700;color:var(--black);margin-bottom:4px}
+.pin-sub{font-size:13px;color:var(--muted);margin-bottom:28px}
+.pin-dots{display:flex;justify-content:center;gap:12px;margin-bottom:24px}
+.pin-dot{width:16px;height:16px;border-radius:50%;background:var(--rule);transition:background .15s}
+.pin-dot.filled{background:var(--black)}
+.pin-pad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:240px;margin:0 auto}
+.pin-key{background:var(--card);border:2px solid var(--rule);border-radius:14px;padding:16px;font-size:20px;font-weight:700;cursor:pointer;font-family:'Montserrat',sans-serif;transition:all .12s}
+.pin-key:active{transform:scale(.93);background:var(--bg)}
+.pin-key.del{font-size:15px;color:var(--muted)}
+.pin-error{color:#E74C3C;font-size:13px;font-weight:600;margin-top:14px;min-height:20px}
+.pin-change{font-size:12px;color:var(--muted);text-decoration:underline;cursor:pointer;margin-top:16px;display:inline-block}
+
 /* ── WORKER SELECT ── */
 .ws{padding:18px 15px}
 .s-lbl{font-size:10px;font-weight:700;letter-spacing:.25em;text-transform:uppercase;color:var(--light);margin-bottom:4px}
@@ -314,6 +328,36 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
   <div style="font-size:13px;font-weight:600;color:#888">Загрузка заказов...</div>
 </div>
 
+<!-- ═══ PIN ═══ -->
+<div class="screen" id="s-pin">
+  <div class="pin-wrap">
+    <div class="pin-name" id="pinWorkerName">—</div>
+    <div class="pin-sub">Введите PIN-код</div>
+    <div class="pin-dots">
+      <div class="pin-dot" id="pd0"></div>
+      <div class="pin-dot" id="pd1"></div>
+      <div class="pin-dot" id="pd2"></div>
+      <div class="pin-dot" id="pd3"></div>
+    </div>
+    <div class="pin-pad">
+      <button class="pin-key" onclick="pinKey('1')">1</button>
+      <button class="pin-key" onclick="pinKey('2')">2</button>
+      <button class="pin-key" onclick="pinKey('3')">3</button>
+      <button class="pin-key" onclick="pinKey('4')">4</button>
+      <button class="pin-key" onclick="pinKey('5')">5</button>
+      <button class="pin-key" onclick="pinKey('6')">6</button>
+      <button class="pin-key" onclick="pinKey('7')">7</button>
+      <button class="pin-key" onclick="pinKey('8')">8</button>
+      <button class="pin-key" onclick="pinKey('9')">9</button>
+      <button class="pin-key" style="visibility:hidden"></button>
+      <button class="pin-key" onclick="pinKey('0')">0</button>
+      <button class="pin-key del" onclick="pinDel()">⌫</button>
+    </div>
+    <div class="pin-error" id="pinError"></div>
+    <span class="pin-change" onclick="pinChangeWorker()">← Сменить кладовщика</span>
+  </div>
+</div>
+
 <!-- ═══ WORKER SELECT ═══ -->
 <div class="screen" id="s-worker">
   <div class="ws">
@@ -467,7 +511,7 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
 // URL берётся из файла config.js (лежит рядом с этим файлом)
 const MSK_OFFSET  = 3;
 const NIGHT_START = 22, NIGHT_END = 9;
-const DRAFT_KEY   = 'wh_draft';
+// DRAFT_KEY убран — используем draftKey() который зависит от имени кладовщика
 const AUTOSAVE_INT= 30000;
 const ICONS = ['👩','👨','🧑','👩','👩','👨'];
 const DAYS_SHORT  = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
@@ -483,9 +527,12 @@ let worker=null, visitor=null, operation=null, shiftStart=null;
 let pendingOrders=[];
 let autosaveTimer=null, formOpen=true, currentShiftTab='add';
 let hasOther=false;
-// Заказы уже обработанные сегодня (из лога на сервере)
 let serverIssuedToday   = new Set();
-let serverReturnedToday = new Set(); // whether any "__other__" is in pendingOrders
+let serverReturnedToday = new Set();
+
+// Ключ localStorage зависит от кладовщика — чтобы у каждого своё хранилище
+function draftKey(){ return worker ? 'wh_draft_'+worker.replace(/\s+/g,'_') : 'wh_draft'; }
+function authKey(w){ return 'wh_auth_'+w.replace(/\s+/g,'_'); }
 
 // ── INIT ──
 async function init(){
@@ -493,7 +540,24 @@ async function init(){
   renderDateLine(); populateDatePicker();
   await loadData();
   document.getElementById('loadingScr').style.display='none';
-  checkForDraft();
+
+  // Проверяем URL-параметр ?worker=Имя
+  const urlWorker = new URLSearchParams(location.search).get('worker');
+  if(urlWorker){
+    // Ссылка с конкретным кладовщиком
+    const found = workers.find(w=>w.name===urlWorker);
+    if(found){
+      worker = found.name;
+      // Уже авторизован на этом устройстве?
+      if(localStorage.getItem(authKey(worker))==='1'){
+        afterAuth();
+      } else {
+        showPinScreen(found);
+      }
+      return;
+    }
+  }
+  // Обычный вход — выбор кладовщика
   showScreen('s-worker');
 }
 
@@ -558,24 +622,27 @@ function showToast(msg, color){
 }
 
 // ── LOAD ──
-async function loadData(){
+async function loadData(workerParam){
   if(SCRIPT_URL.includes('YOUR_')){
-    workers=[{name:'Оля'},{name:'Тамилла'},{name:'Максим'},{name:'Гоша'},{name:'Алевтина'},{name:'Наташа'}];
+    workers=[{name:'Оля',pin:'1234'},{name:'Тамилла',pin:'1234'},{name:'Максим',pin:'1234'}];
     orders=demoOrders();
-  } else {
-    try{
-      const r=await fetch(SCRIPT_URL+'?action=getData&t='+Date.now());
-      const j=await r.json();
-      workers=j.workers||[]; orders=j.orders||[];
-      // processedOrders — какие заказы уже выданы/возвращены согласно логу визитов
-      serverIssuedToday   = new Set(j.processedOrders?.issued   || []);
-      serverReturnedToday = new Set(j.processedOrders?.returned || []);
-    }catch(e){
-      workers=[{name:'Оля'},{name:'Тамилла'},{name:'Максим'},{name:'Гоша'},{name:'Алевтина'},{name:'Наташа'}];
-      orders=[];
-    }
+    return null;
+  }
+  try{
+    const wp = workerParam ? '&worker='+encodeURIComponent(workerParam) : '';
+    const r=await fetch(SCRIPT_URL+'?action=getData&t='+Date.now()+wp);
+    const j=await r.json();
+    workers=j.workers||[]; orders=j.orders||[];
+    serverIssuedToday   = new Set(j.processedOrders?.issued   || []);
+    serverReturnedToday = new Set(j.processedOrders?.returned || []);
+    return j.draft || null; // черновик этого кладовщика с сервера
+  }catch(e){
+    workers=[{name:'Оля',pin:'1234'},{name:'Тамилла',pin:'1234'},{name:'Максим',pin:'1234'}];
+    orders=[];
+    return null;
   }
   renderWorkers(); populateOrders();
+  return null;
 }
 
 function demoOrders(){
@@ -593,7 +660,7 @@ function demoOrders(){
 function saveDraft(){
   if(!worker||!visits.length) return;
   const draft={worker,shiftStart:shiftStart?.toISOString()||null,visits,isNight:isNight()?'Ночь':'День',savedAt:new Date().toISOString()};
-  localStorage.setItem(DRAFT_KEY,JSON.stringify(draft));
+  localStorage.setItem(draftKey(),JSON.stringify(draft));
   if(!SCRIPT_URL.includes('YOUR_')){
     fetch(SCRIPT_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({...draft,isDraft:true,shiftDate:new Date().toLocaleDateString('ru'),totalEntries:visits.length,entries:visits})}).catch(()=>{});
@@ -605,17 +672,19 @@ function saveDraft(){
 function startAutosave(){ stopAutosave(); autosaveTimer=setInterval(saveDraft,AUTOSAVE_INT); }
 function stopAutosave(){ if(autosaveTimer){clearInterval(autosaveTimer);autosaveTimer=null;} }
 
-function checkForDraft(){
-  const raw=localStorage.getItem(DRAFT_KEY);
-  if(!raw) return;
+// Проверяет черновик из localStorage ИЛИ с сервера (serverDraft)
+function checkForDraft(serverDraft){
+  const raw = localStorage.getItem(draftKey()) || (serverDraft ? JSON.stringify(serverDraft) : null);
+  if(!raw) return false;
   try{
     const d=JSON.parse(raw);
-    if(!d.worker||!d.visits?.length) return;
+    if(!d.worker||!d.visits?.length) return false;
     const hrs=Math.round((Date.now()-new Date(d.savedAt))/360000)/10;
     const el=document.getElementById('restoreBanner');
-    document.getElementById('restoreInfo').textContent=`${d.worker} · ${d.visits.length} визитов · ${hrs} ч. назад`;
+    document.getElementById('restoreInfo').textContent=`${d.visits.length} ${pl(d.visits.length,'визит','визита','визитов')} · ${hrs} ч. назад`;
     el.classList.add('show'); el.dataset.draft=raw;
-  }catch(e){ localStorage.removeItem(DRAFT_KEY); }
+    return true;
+  }catch(e){ localStorage.removeItem(draftKey()); return false; }
 }
 function restoreShift(){
   const raw=document.getElementById('restoreBanner').dataset.draft;
@@ -623,7 +692,6 @@ function restoreShift(){
   const draft=JSON.parse(raw);
   worker=draft.worker; visits=draft.visits||[];
   shiftStart=draft.shiftStart?new Date(draft.shiftStart):new Date();
-  document.querySelectorAll('.wbtn').forEach(b=>{ if(b.querySelector('.wname')?.textContent===worker)b.classList.add('sel'); });
   document.getElementById('restoreBanner').classList.remove('show');
   document.getElementById('shiftWho').innerHTML=worker+`<span>· восстановлено</span>`;
   updateShiftInfoCard();
@@ -635,7 +703,77 @@ function restoreShift(){
   renderTable(); updateOrdersBar(); renderOrderCards();
   startAutosave();
 }
-function discardDraft(){ localStorage.removeItem(DRAFT_KEY); document.getElementById('restoreBanner').classList.remove('show'); }
+function discardDraft(){ localStorage.removeItem(draftKey()); document.getElementById('restoreBanner').classList.remove('show'); }
+
+// ── PIN ──
+let pinBuffer='', pinWorkerObj=null;
+
+function showPinScreen(workerObj){
+  pinWorkerObj=workerObj;
+  pinBuffer='';
+  document.getElementById('pinWorkerName').textContent=workerObj.name;
+  document.getElementById('pinError').textContent='';
+  updatePinDots();
+  showScreen('s-pin');
+}
+
+function pinKey(digit){
+  if(pinBuffer.length>=4) return;
+  pinBuffer+=digit;
+  updatePinDots();
+  if(pinBuffer.length===4) setTimeout(checkPin,120);
+}
+
+function pinDel(){
+  pinBuffer=pinBuffer.slice(0,-1);
+  updatePinDots();
+  document.getElementById('pinError').textContent='';
+}
+
+function updatePinDots(){
+  for(let i=0;i<4;i++){
+    document.getElementById('pd'+i).classList.toggle('filled',i<pinBuffer.length);
+  }
+}
+
+function checkPin(){
+  const correctPin = pinWorkerObj?.pin || '';
+  if(pinBuffer===correctPin){
+    localStorage.setItem(authKey(pinWorkerObj.name),'1');
+    worker=pinWorkerObj.name;
+    afterAuth();
+  } else {
+    pinBuffer='';
+    updatePinDots();
+    document.getElementById('pinError').textContent='Неверный PIN, попробуйте ещё раз';
+  }
+}
+
+function pinChangeWorker(){
+  worker=null; pinWorkerObj=null; pinBuffer='';
+  // Убираем URL-параметр чтобы вернуться к выбору
+  history.replaceState(null,'',location.pathname);
+  showScreen('s-worker');
+}
+
+// Вызывается после успешной авторизации (PIN или авто по localStorage)
+async function afterAuth(){
+  document.getElementById('loadingScr').style.display='block';
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  const serverDraft = await loadData(worker);
+  document.getElementById('loadingScr').style.display='none';
+  renderWorkers(); populateOrders();
+  const hasDraft = checkForDraft(serverDraft);
+  if(!hasDraft){
+    showScreen('s-worker'); // покажем экран со StartShift кнопкой
+    // Авто-выбираем кладовщика в гриде
+    document.querySelectorAll('.wbtn').forEach(b=>{
+      if(b.querySelector('.wname')?.textContent===worker) b.classList.add('sel');
+    });
+    document.getElementById('startBtn').disabled=false;
+  }
+  // Если есть черновик — restoreBanner уже показан, пользователь выбирает
+}
 
 // ── WORKERS ──
 function renderWorkers(){
@@ -650,8 +788,15 @@ function selWorker(name,el){
   document.querySelectorAll('.wbtn').forEach(b=>b.classList.remove('sel'));
   el.classList.add('sel'); worker=name;
   document.getElementById('startBtn').disabled=false;
+  // Если уже авторизован на этом устройстве — не спрашиваем PIN повторно
+  // PIN спросим только при первом нажатии Start
 }
 function startShift(){
+  // Если не авторизован на этом устройстве — сначала PIN
+  if(worker && localStorage.getItem(authKey(worker))!=='1'){
+    const workerObj = workers.find(w=>w.name===worker);
+    if(workerObj){ showPinScreen(workerObj); return; }
+  }
   shiftStart=new Date();
   document.getElementById('shiftWho').innerHTML=worker+`<span>· ${nowTime()} МСК</span>`;
   updateShiftInfoCard();
@@ -1189,7 +1334,7 @@ async function confirmSubmit(){
     }))
   };
   const s=JSON.parse(localStorage.getItem('wh_shifts')||'[]'); s.push(payload); localStorage.setItem('wh_shifts',JSON.stringify(s));
-  localStorage.removeItem(DRAFT_KEY);
+  localStorage.removeItem(draftKey());
   if(!SCRIPT_URL.includes('YOUR_')){
     try{await fetch(SCRIPT_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})}catch(e){}
   }
