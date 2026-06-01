@@ -379,6 +379,31 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
   </div>
 </div>
 
+<!-- ═══ OLD SHIFT (смена висит > 12ч) ═══ -->
+<div class="screen" id="s-old-shift">
+  <div class="wlc">
+    <div style="font-size:44px;margin-bottom:12px">⏰</div>
+    <div class="wlc-name" id="oldShiftWorker">—</div>
+    <div class="wlc-sub" id="oldShiftInfo">Незакрытая смена</div>
+    <div class="wlc-btns">
+      <button class="wlc-btn primary" onclick="closeOldShift()">
+        <span class="wlc-btn-ico">✅</span>
+        <span class="wlc-btn-txt">
+          <span class="wlc-btn-title" id="oldShiftCloseLabel">Закрыть ту смену</span>
+          <span class="wlc-btn-desc">Отправить данные и завершить</span>
+        </span>
+      </button>
+      <button class="wlc-btn secondary" onclick="continueOldShift()">
+        <span class="wlc-btn-ico">▶️</span>
+        <span class="wlc-btn-txt">
+          <span class="wlc-btn-title">Продолжить смену</span>
+          <span class="wlc-btn-desc">Остаться в той же смене</span>
+        </span>
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ PIN ═══ -->
 <div class="screen" id="s-pin">
   <div class="pin-wrap">
@@ -602,25 +627,33 @@ async function init(){
     const found = workers.find(w=>w.name.trim()===urlWorker.trim());
     if(found){
       worker = found.name;
-      window._serverDraft = serverDraft;
-      // Есть открытая смена? → сразу в смену, минуя приветствие
-      const hasDraft = checkForDraft(serverDraft);
-      if(hasDraft){
-        // restoreBanner уже показан — показываем экран выбора с кнопкой восстановить
-        document.querySelectorAll('.wbtn').forEach(b=>{
-          if(b.querySelector('.wname')?.textContent===worker) b.classList.add('sel');
-        });
-        document.getElementById('startBtn').disabled=false;
-        showScreen('s-worker');
-      } else {
-        // Смена закрыта → приветственный экран
-        showWelcomeScreen(found);
+      // Ищем черновик: сначала localStorage, затем с сервера
+      const draftRaw = localStorage.getItem(draftKey())
+        || (serverDraft ? JSON.stringify(serverDraft) : null);
+
+      if(draftRaw){
+        try{
+          const d = JSON.parse(draftRaw);
+          if(d.visits){
+            const hoursSince = (Date.now() - new Date(d.savedAt)) / 3600000;
+            if(hoursSince < 12){
+              // Свежая смена → сразу в работу
+              restoreShiftDirect(d);
+            } else {
+              // Старая смена → спрашиваем
+              showOldShiftScreen(d);
+            }
+            return;
+          }
+        }catch(e){ localStorage.removeItem(draftKey()); }
       }
-      return;
-    } else {
-      showScreen('s-worker');
+      // Нет черновика → welcome
+      showWelcomeScreen(found);
       return;
     }
+    // Имя не найдено → общий выбор
+    showScreen('s-worker');
+    return;
   }
 
   // Обычный вход — выбор кладовщика
@@ -639,17 +672,7 @@ function showWelcomeScreen(workerObj){
 }
 
 function welcomeStartShift(){
-  const hasDraft = checkForDraft(window._serverDraft||null);
-  if(hasDraft){
-    // Показываем экран с баннером восстановления
-    document.querySelectorAll('.wbtn').forEach(b=>{
-      if(b.querySelector('.wname')?.textContent===worker) b.classList.add('sel');
-    });
-    document.getElementById('startBtn').disabled=false;
-    showScreen('s-worker');
-  } else {
-    startShift();
-  }
+  startShift();
 }
 
 function welcomeViewOnly(){
@@ -856,7 +879,47 @@ function pinChangeWorker(){
   showScreen('s-worker');
 }
 
-// afterAuth удалён — логика перенесена напрямую в init()
+// ── RESTORE DIRECT (без баннера, для персональной ссылки) ──
+function restoreShiftDirect(draft){
+  visits=draft.visits||[];
+  shiftStart=draft.shiftStart?new Date(draft.shiftStart):new Date();
+  localStorage.setItem(draftKey(), JSON.stringify(draft));
+  document.getElementById('shiftWho').innerHTML=worker+`<span>· восстановлено</span>`;
+  updateShiftInfoCard();
+  showScreen('s-shift');
+  switchShiftTab('add');
+  pendingOrders=[]; renderPendingOrders();
+  setVisitor('client',document.querySelector('.vbtn.c'));
+  document.getElementById('timeInp').value=nowTime();
+  renderTable(); updateOrdersBar(); renderOrderCards();
+  startAutosave(); startOrdersRefresh();
+}
+
+// ── OLD SHIFT SCREEN (смена > 12ч) ──
+function showOldShiftScreen(draft){
+  window._oldDraft = draft;
+  const start = new Date(draft.shiftStart||draft.savedAt);
+  const msk = new Date(start.getTime()+3*3600000);
+  const dateStr = start.toLocaleDateString('ru',{day:'numeric',month:'long',timeZone:'Europe/Moscow'});
+  const timeStr = pad(msk.getUTCHours())+':'+pad(msk.getUTCMinutes());
+  document.getElementById('oldShiftWorker').textContent = worker;
+  document.getElementById('oldShiftInfo').textContent =
+    `Смена от ${dateStr}, ${timeStr} · ${draft.visits?.length||0} ${pl(draft.visits?.length||0,'визит','визита','визитов')}`;
+  document.getElementById('oldShiftCloseLabel').textContent = `Закрыть смену от ${dateStr}`;
+  showScreen('s-old-shift');
+}
+
+function closeOldShift(){
+  const draft = window._oldDraft; if(!draft) return;
+  restoreShiftDirect(draft);
+  // Даём время на рендер, потом открываем модалку закрытия
+  setTimeout(openModal, 200);
+}
+
+function continueOldShift(){
+  const draft = window._oldDraft; if(!draft) return;
+  restoreShiftDirect(draft);
+}
 
 // ── WORKERS ──
 function renderWorkers(){
