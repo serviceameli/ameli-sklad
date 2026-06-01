@@ -981,9 +981,9 @@ function populateOrders(){
 
   const {issuedIds, returnedIds}=getSessionStatuses();
 
-  const toIssue  = orders.filter(o=>o.type==='issue'  && !issuedIds.has(o.id) && !returnedIds.has(o.id) && !o.overdue);
-  const toReturn = orders.filter(o=>o.type==='return' && !returnedIds.has(o.id) && !issuedIds.has(o.id) && !o.overdue);
-  const overdue  = orders.filter(o=>o.overdue && !issuedIds.has(o.id) && !returnedIds.has(o.id));
+  const toIssue  = orders.filter(o=>!o.overdue && getEffectiveOrderType(o,issuedIds,returnedIds)==='issue');
+  const toReturn = orders.filter(o=>!o.overdue && getEffectiveOrderType(o,issuedIds,returnedIds)==='return');
+  const overdue  = orders.filter(o=>o.overdue  && getEffectiveOrderType(o,issuedIds,returnedIds)!=='done');
 
   // Build tap-list
   const tl=document.getElementById('orderTapList');
@@ -1082,6 +1082,23 @@ async function refreshOrdersFromServer(){
       renderOrderCards();
     }
   }catch(e){ /* silent fail */ }
+}
+
+// Возвращает эффективный тип заказа с учётом однодневной аренды:
+//   'issue'    → нужно выдать
+//   'return'   → нужно принять возврат
+//   'done'     → полностью обработан
+function getEffectiveOrderType(o, issuedIds, returnedIds){
+  if(o.sameDay){
+    // Однодневная аренда: выдача → возврат → готово
+    if(returnedIds.has(o.id)) return 'done';
+    if(issuedIds.has(o.id))   return 'return'; // уже выдан — ждём возврат
+    return 'issue'; // ещё не выдан
+  }
+  // Обычный заказ
+  if(o.type==='issue'  && issuedIds.has(o.id))   return 'done';
+  if(o.type==='return' && returnedIds.has(o.id))  return 'done';
+  return o.type;
 }
 
 // Объединяет: что обработано сегодня в логе (серверные данные) + текущая сессия
@@ -1371,10 +1388,10 @@ function updateOrdersBar(){
   const {issuedIds,returnedIds}=getSessionStatuses();
   let p=0,is=0,re=0,ov=0;
   orders.forEach(o=>{
-    if(issuedIds.has(o.id))      is++;
-    else if(returnedIds.has(o.id)) re++;
-    else if(o.overdue)             ov++;
-    else                           p++;
+    const eff=getEffectiveOrderType(o,issuedIds,returnedIds);
+    if(eff==='done')   { o.type==='return'||o.sameDay&&returnedIds.has(o.id) ? re++ : is++; }
+    else if(o.overdue) ov++;
+    else               p++;
   });
   document.getElementById('bar-pending').textContent=p;
   document.getElementById('bar-issued').textContent=is;
@@ -1391,23 +1408,22 @@ function updateOrdersBar(){
 function renderOrderCards(){
   const {issuedIds,returnedIds}=getSessionStatuses();
   const display=orders.map(o=>{
-    let s=o.status||'pending';
-    if(issuedIds.has(o.id))    s='issued';
-    if(returnedIds.has(o.id))  s='returned';
-    return{...o,s};
+    const eff=getEffectiveOrderType(o,issuedIds,returnedIds);
+    return{...o, eff};
   });
-  const oc=display.filter(o=>o.overdue&&o.s==='pending').length;
-  const pc=display.filter(o=>!o.overdue&&o.s==='pending').length;
-  const ic=display.filter(o=>o.s==='issued').length;
-  const rc=display.filter(o=>o.s==='returned').length;
+  const oc=display.filter(o=>o.overdue&&o.eff!=='done').length;
+  const pc=display.filter(o=>!o.overdue&&(o.eff==='issue'||o.eff==='return')).length;
+  const ic=display.filter(o=>o.eff==='done'&&o.type==='issue'&&!o.sameDay).length
+         + display.filter(o=>o.eff==='return'&&o.sameDay).length; // однодневка выдана, ждёт возврата
+  const rc=display.filter(o=>o.eff==='done'&&(o.type==='return'||o.sameDay)).length;
   document.getElementById('ordersMini').innerHTML=[
     ['Ожидают','var(--pending)',pc],['Выдано','var(--issued)',ic],['Возвращено','var(--ret)',rc]
   ].map(([l,c,n])=>`<div class="osc" style="border-top:2px solid ${c}"><div class="osc-l">${l}</div><div class="osc-n">${n}</div></div>`).join('');
 
-  const overdueOrders   = display.filter(o=>o.overdue && o.s==='pending');
-  const pendingIssue    = display.filter(o=>o.type!=='return' && o.s==='pending' && !o.overdue);
-  const pendingReturn   = display.filter(o=>o.type==='return'  && o.s==='pending' && !o.overdue);
-  const done            = display.filter(o=>o.s==='issued'||o.s==='returned');
+  const overdueOrders   = display.filter(o=>o.overdue && o.eff!=='done');
+  const pendingIssue    = display.filter(o=>o.eff==='issue' && !o.overdue);
+  const pendingReturn   = display.filter(o=>o.eff==='return' && !o.overdue);
+  const done            = display.filter(o=>o.eff==='done');
 
   let html='';
   if(overdueOrders.length){
@@ -1431,9 +1447,10 @@ function renderOrderCards(){
 }
 
 function orderCard(o){
-  const isOverdue=o.overdue&&o.s==='pending';
-  const cls=o.s==='issued'?'issued':o.s==='returned'?'returned':isOverdue?'overdue':o.type==='return'?'return-due':'pending';
-  const txt=o.s==='issued'?'✓ Выдан':o.s==='returned'?'✓ Возвращён':isOverdue?'🔴 Просрочен':o.type==='return'?'🔄 К возврату':'⏳ Ожидает';
+  const eff=o.eff||'issue';
+  const isOverdue=o.overdue&&eff!=='done';
+  const cls=eff==='done'&&o.type==='return'?'returned':eff==='done'?'issued':eff==='return'?'return-due':isOverdue?'overdue':'pending';
+  const txt=eff==='done'&&(o.type==='return'||o.sameDay&&o.returnedIds)?'✓ Возвращён':eff==='done'?'✓ Выдан':eff==='return'?'🔄 К возврату':isOverdue?'🔴 Просрочен':'⏳ Ожидает';
   return`<div class="order-card ${cls}">
     <div class="oc-top"><span class="oc-id">${o.id}</span><span class="oc-status ${cls}">${txt}</span></div>
     <div class="oc-client">${o.client||'—'}</div>

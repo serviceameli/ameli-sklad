@@ -255,17 +255,25 @@ function getTodayOrders() {
     const issueTime  = parseTimeRange(r[3]);
     const returnTime = parseTimeRange(r[5]);
 
-    if (issueDate === today) {
+    if (issueDate === today && returnDate === today) {
+      // Однодневная аренда: выдача и возврат в один день
+      // Тип определяется фронтендом в зависимости от статуса выдачи
       result.push({
         id: orderId, client: r[16].toString().trim(), company: r[18].toString().trim(),
         issueDate, issueTime, returnDate, returnTime,
-        delivery, worker, type: 'issue'
+        delivery, worker, type: 'issue', sameDay: true
       });
-    } else if (returnDate === today && issueDate !== today) {
+    } else if (issueDate === today) {
       result.push({
         id: orderId, client: r[16].toString().trim(), company: r[18].toString().trim(),
         issueDate, issueTime, returnDate, returnTime,
-        delivery, worker, type: 'return'
+        delivery, worker, type: 'issue', sameDay: false
+      });
+    } else if (returnDate === today) {
+      result.push({
+        id: orderId, client: r[16].toString().trim(), company: r[18].toString().trim(),
+        issueDate, issueTime, returnDate, returnTime,
+        delivery, worker, type: 'return', sameDay: false
       });
     }
   });
