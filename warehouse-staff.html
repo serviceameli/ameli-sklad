@@ -1020,7 +1020,6 @@ function renderTable(){
     ? `${visits.length} ${pl(visits.length,'визит','визита','визитов')} за смену`
     : 'Нет визитов — можно закрыть смену';
   document.getElementById('subHint').textContent=hint;
-  document.getElementById('subHint2').textContent=hint;
 
   if(!visits.length){
     tbody.innerHTML=''; empty.style.display='block'; cnt.textContent='';
