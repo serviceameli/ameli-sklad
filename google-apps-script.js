@@ -51,8 +51,9 @@ function getProcessedOrderIds() {
 
     if (!orderIds.length) return;
 
-    const isIssue  = ['Выдача','Получение (наш)','Получение+Возврат'].includes(operation);
-    const isReturn = ['Возврат','Возврат (наш)','Получение+Возврат'].includes(operation);
+    // Новые и старые названия операций — для совместимости с ранее записанными строками
+    const isIssue  = ['Выдача','Выдача (наш)','Выдача+Возврат (наш)','Получение (наш)','Получение+Возврат'].includes(operation);
+    const isReturn = ['Возврат','Возврат (наш)','Выдача+Возврат (наш)','Получение+Возврат'].includes(operation);
 
     orderIds.forEach(id => {
       if (isIssue)  issued.add(id);
@@ -388,9 +389,14 @@ function mapStatus(s) {
 }
 
 function visitorLabel(v)  { return {client:'Клиент',yandex:'Курьер Яндекс',our:'Наш курьер'}[v]||v||''; }
-function operationLabel(o){ return {issue:'Выдача',return:'Возврат',pickup:'Получение (наш)',dropoff:'Возврат (наш)',both:'Получение+Возврат'}[o]||o||''; }
+function operationLabel(o){ return {issue:'Выдача',return:'Возврат',pickup:'Выдача (наш)',dropoff:'Возврат (наш)',both:'Выдача+Возврат (наш)'}[o]||o||''; }
 function reverseVisitor(s){ return {'Клиент':'client','Курьер Яндекс':'yandex','Наш курьер':'our'}[s]||s; }
-function reverseOperation(s){ return {'Выдача':'issue','Возврат':'return','Получение (наш)':'pickup','Возврат (наш)':'dropoff','Получение+Возврат':'both'}[s]||s; }
+function reverseOperation(s){ return {
+  'Выдача':'issue','Возврат':'return',
+  'Выдача (наш)':'pickup','Возврат (наш)':'dropoff','Выдача+Возврат (наш)':'both',
+  // Старые названия (обратная совместимость)
+  'Получение (наш)':'pickup','Получение+Возврат':'both'
+}[s]||s; }
 
 // ════════════════════════════════════
 //  ПЕРВИЧНАЯ НАСТРОЙКА — Run → setupSheets

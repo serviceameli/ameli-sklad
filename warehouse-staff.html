@@ -479,10 +479,10 @@ const DAYS_SHORT  = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
 
 const OPS_CLIENT = [{id:'issue',label:'📦 Выдача'},{id:'return',label:'🔄 Возврат'}];
 const OPS_YANDEX = [{id:'issue',label:'📦 Выдача'},{id:'return',label:'🔄 Возврат'}];
-const OPS_OUR    = [{id:'pickup',label:'📥 Получение'},{id:'dropoff',label:'📤 Возврат'},{id:'both',label:'🔃 Оба'}];
+const OPS_OUR    = [{id:'pickup',label:'📦 Выдача'},{id:'dropoff',label:'🔄 Возврат'},{id:'both',label:'🔃 Оба'}];
 const OPS = {client:OPS_CLIENT,yandex:OPS_YANDEX,our:OPS_OUR};
 const VIS_LBL = {client:'Клиент',yandex:'Яндекс',our:'Наш курьер'};
-const OP_LBL  = {issue:'Выдача',return:'Возврат',pickup:'Получение',dropoff:'Возврат',both:'Получ.+Возврат'};
+const OP_LBL  = {issue:'Выдача',return:'Возврат',pickup:'Выдача (наш)',dropoff:'Возврат (наш)',both:'Выдача+Возврат'};
 
 let workers=[], orders=[], visits=[];
 let worker=null, visitor=null, operation=null, shiftStart=null;
