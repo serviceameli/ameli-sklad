@@ -1001,10 +1001,12 @@ function sendVisitNow(visit){
     comment:visit.comment||'', date:visit.date||'', time:visit.time, timeAuto:visit.timeAuto,
     timestamp:visit.ts, night:visit.night?'Ночь':'День'
   };
+  const n=mskNow();
+  const mskDate=pad(n.getUTCDate())+'.'+pad(n.getUTCMonth()+1)+'.'+n.getUTCFullYear();
   fetch(SCRIPT_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({
       action:'addVisit',
-      shiftDate:new Date().toLocaleDateString('ru',{timeZone:'Europe/Moscow'}),
+      shiftDate:mskDate,
       shiftStart:shiftStart?shiftStart.toISOString():new Date().toISOString(),
       shiftEnd:'',
       worker, isNight:isNight()?'Ночь':'День',

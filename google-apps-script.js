@@ -150,6 +150,7 @@ function ensureLogHeader(log) {
 }
 
 function writeEntryToLog(log, data, entry) {
+  if (!entry || !entry.visitor) return; // не писать пустые строки
   const entryOrders = entry.orders || [];
   if (!entryOrders.length) {
     log.appendRow([
@@ -184,14 +185,16 @@ function writeEntryToLog(log, data, entry) {
   });
 }
 
-// Удаляет все строки лога принадлежащие данной смене (по shiftStart + worker)
-// Вызывается при закрытии смены чтобы не дублировать визиты, записанные по одному
+// Удаляет все строки лога принадлежащие данной смене (по shiftStart + worker).
+// Google Sheets конвертирует ISO-строки в объекты Date, поэтому сравниваем через toISOString().
 function deleteShiftRows(log, shiftStart, worker) {
   if (log.getLastRow() < 2) return;
   const vals = log.getRange(2, 1, log.getLastRow()-1, 4).getValues();
   for (let i = vals.length-1; i >= 0; i--) {
-    // col B (index 1) = shiftStart, col D (index 3) = worker
-    if (vals[i][1] === shiftStart && vals[i][3] === worker) {
+    const storedStart = vals[i][1] instanceof Date
+      ? vals[i][1].toISOString()
+      : vals[i][1].toString();
+    if (storedStart === shiftStart && vals[i][3].toString() === worker) {
       log.deleteRow(i+2);
     }
   }
