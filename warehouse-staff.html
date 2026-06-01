@@ -538,26 +538,36 @@ function authKey(w){ return 'wh_auth_'+w.replace(/\s+/g,'_'); }
 async function init(){
   updatePill(); setInterval(updatePill,60000);
   renderDateLine(); populateDatePicker();
-  await loadData();
-  document.getElementById('loadingScr').style.display='none';
 
   // Проверяем URL-параметр ?worker=Имя
   const urlWorker = new URLSearchParams(location.search).get('worker');
+
+  // Один запрос к серверу — с именем кладовщика если есть (чтобы получить его черновик)
+  const serverDraft = await loadData(urlWorker || null);
+  renderWorkers(); populateOrders();
+  document.getElementById('loadingScr').style.display='none';
+
   if(urlWorker){
-    // Ссылка с конкретным кладовщиком
     const found = workers.find(w=>w.name===urlWorker);
     if(found){
       worker = found.name;
-      // PIN ОТКЛЮЧЁН — afterAuth сразу без проверки
-      // if(localStorage.getItem(authKey(worker))==='1'){
-      //   afterAuth();
-      // } else {
-      //   showPinScreen(found);
-      // }
-      afterAuth();
+      // Есть незакрытая смена? → предложить восстановить
+      const hasDraft = checkForDraft(serverDraft);
+      if(hasDraft){
+        // restoreBanner показан внутри checkForDraft, показываем экран выбора
+        document.querySelectorAll('.wbtn').forEach(b=>{
+          if(b.querySelector('.wname')?.textContent===worker) b.classList.add('sel');
+        });
+        document.getElementById('startBtn').disabled=false;
+        showScreen('s-worker');
+      } else {
+        // Нет черновика — сразу открываем смену
+        startShift();
+      }
       return;
     }
   }
+
   // Обычный вход — выбор кладовщика
   showScreen('s-worker');
 }
@@ -757,24 +767,7 @@ function pinChangeWorker(){
   showScreen('s-worker');
 }
 
-// Вызывается после успешной авторизации (PIN или авто по localStorage)
-async function afterAuth(){
-  document.getElementById('loadingScr').style.display='block';
-  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
-  const serverDraft = await loadData(worker);
-  document.getElementById('loadingScr').style.display='none';
-  renderWorkers(); populateOrders();
-  const hasDraft = checkForDraft(serverDraft);
-  if(!hasDraft){
-    showScreen('s-worker'); // покажем экран со StartShift кнопкой
-    // Авто-выбираем кладовщика в гриде
-    document.querySelectorAll('.wbtn').forEach(b=>{
-      if(b.querySelector('.wname')?.textContent===worker) b.classList.add('sel');
-    });
-    document.getElementById('startBtn').disabled=false;
-  }
-  // Если есть черновик — restoreBanner уже показан, пользователь выбирает
-}
+// afterAuth удалён — логика перенесена напрямую в init()
 
 // ── WORKERS ──
 function renderWorkers(){
