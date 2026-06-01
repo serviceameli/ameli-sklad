@@ -434,7 +434,7 @@ function setupOverdueTrigger() {
     .filter(t => t.getHandlerFunction() === 'recordOverdueOrders')
     .forEach(t => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger('recordOverdueOrders')
-    .timeBased().atHour(23).everyDays(1).inTimezone('Europe/Moscow').create();
+    .timeBased().atHour(0).everyDays(1).inTimezone('Europe/Moscow').create();
 }
 
 // ════════════════════════════════════
