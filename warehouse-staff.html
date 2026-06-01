@@ -1414,9 +1414,10 @@ function updateOrdersBar(){
   let p=0,is=0,re=0,ov=0;
   orders.forEach(o=>{
     const eff=getEffectiveOrderType(o,issuedIds,returnedIds);
-    if(eff==='done')   { o.type==='return'||o.sameDay&&returnedIds.has(o.id) ? re++ : is++; }
-    else if(o.overdue) ov++;
-    else               p++;
+    if(eff==='done')        { o.sameDay||o.type==='return' ? re++ : is++; }
+    else if(o.sameDay&&eff==='return') { is++; p++; } // выдан + ожидает возврата
+    else if(o.overdue)      ov++;
+    else                    p++;
   });
   document.getElementById('bar-pending').textContent=p;
   document.getElementById('bar-issued').textContent=is;
@@ -1450,6 +1451,8 @@ function renderOrderCards(){
   // sameDay ещё не выданные — показываем и в "К возврату" (заблокированные)
   const sameDayLocked   = display.filter(o=>o.sameDay && o.eff==='issue' && !o.overdue);
   const pendingReturn   = display.filter(o=>o.eff==='return' && !o.overdue);
+  // sameDay выданные (eff==='return') — показываем и в "Выдано" с пометкой
+  const sameDayIssued   = display.filter(o=>o.sameDay && o.eff==='return' && !o.overdue);
   const done            = display.filter(o=>o.eff==='done');
 
   let html='';
@@ -1466,8 +1469,9 @@ function renderOrderCards(){
     html+=sameDayLocked.map(o=>orderCard(o,'locked')).join('');
     html+=pendingReturn.map(o=>orderCard(o)).join('');
   }
-  if(done.length){
-    html+=`<div class="sec-lbl" style="color:var(--issued)">✓ Выдано / Возвращено (${done.length})</div>`;
+  if(done.length||sameDayIssued.length){
+    html+=`<div class="sec-lbl" style="color:var(--issued)">✓ Выдано / Возвращено (${done.length+sameDayIssued.length})</div>`;
+    html+=sameDayIssued.map(o=>orderCard(o,'sameday-issued')).join('');
     html+=done.map(o=>orderCard(o)).join('');
   }
   if(!orders.length) html=`<div style="text-align:center;padding:32px;color:var(--light)"><div style="font-size:26px;margin-bottom:7px">📭</div><div style="font-size:13px;font-weight:600">Нет заказов на сегодня</div></div>`;
@@ -1478,10 +1482,10 @@ function orderCard(o, modifier){
   const eff=o.eff||'issue';
   const isOverdue=o.overdue&&eff!=='done';
   const locked=modifier==='locked';
-  // для sameDay done: возвращён если eff==='done' и sameDay
-  const isDoneReturn=eff==='done'&&(o.type==='return'||(o.sameDay));
-  const cls=locked?'return-due':eff==='done'&&isDoneReturn?'returned':eff==='done'?'issued':eff==='return'?'return-due':isOverdue?'overdue':'pending';
-  const txt=locked?'⏳ Сначала выдайте':eff==='done'&&isDoneReturn?'✓ Возвращён':eff==='done'?'✓ Выдан':eff==='return'?'🔄 К возврату':isOverdue?'🔴 Просрочен':'⏳ Ожидает';
+  const sameDayIssued=modifier==='sameday-issued';
+  const isDoneReturn=eff==='done'&&(o.type==='return'||o.sameDay);
+  const cls=locked?'return-due':sameDayIssued?'issued':eff==='done'&&isDoneReturn?'returned':eff==='done'?'issued':eff==='return'?'return-due':isOverdue?'overdue':'pending';
+  const txt=locked?'⏳ Сначала выдайте':sameDayIssued?'✓ Выдан · ↩ возврат сегодня':eff==='done'&&isDoneReturn?'✓ Возвращён':eff==='done'?'✓ Выдан':eff==='return'?'🔄 К возврату':isOverdue?'🔴 Просрочен':'⏳ Ожидает';
   const opacity=locked?'opacity:0.45;':'';
   return`<div class="order-card ${cls}" style="${opacity}">
     <div class="oc-top"><span class="oc-id">${o.id}</span><span class="oc-status ${cls}">${txt}</span></div>
