@@ -1,0 +1,1214 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Склад — Табель смены</title>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+:root{
+  --black:#1A1A1A;--text:#2D2D2D;--mid:#555;--muted:#888;--light:#bbb;
+  --rule:#e8e8e4;--bg:#F2F1EE;--card:#fff;
+  --accent:#F5C518;--accent-dim:rgba(245,197,24,.12);
+  --client:#2ECC71;--client-dim:rgba(46,204,113,.1);
+  --yandex:#FF6B35;--yandex-dim:rgba(255,107,53,.1);
+  --our:#3D9BE9;--our-dim:rgba(61,155,233,.1);
+  --issue:#8B5CF6;--issue-dim:rgba(139,92,246,.1);
+  --return-c:#EC4899;--return-dim:rgba(236,72,153,.1);
+  --pending:#F5C518;--issued:#2ECC71;--ret:#3D9BE9;
+}
+body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes rowIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pop{from{transform:scale(0);opacity:0}to{transform:scale(1);opacity:1}}
+@keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* ── HEADER ── */
+.hdr{background:var(--black);height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;position:sticky;top:0;z-index:300}
+.hdr-logo{font-size:11px;font-weight:700;letter-spacing:.22em;text-transform:uppercase;color:#fff}
+.hdr-logo em{color:var(--accent);font-style:normal}
+.pill{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;padding:4px 9px;border-radius:20px}
+.pill.day{background:var(--accent-dim);color:var(--accent);border:1px solid rgba(245,197,24,.4)}
+.pill.night{background:rgba(107,127,255,.15);color:#8899ff;border:1px solid rgba(107,127,255,.35)}
+
+/* ── AUTOSAVE ── */
+.save-banner{display:none;background:rgba(46,204,113,.1);border-bottom:1px solid rgba(46,204,113,.2);padding:5px 16px;font-size:11px;font-weight:600;color:#1a8a4a;align-items:center;gap:7px}
+.save-banner.show{display:flex}
+.save-dot{width:6px;height:6px;border-radius:50%;background:var(--issued);animation:blink 2s infinite;flex-shrink:0}
+
+/* ── SCREENS ── */
+.screen{display:none}.screen.active{display:block}
+
+/* ── RESTORE ── */
+.restore-banner{background:var(--black);color:#fff;padding:13px 15px;margin:13px 15px;border-radius:12px;display:none}
+.restore-banner.show{display:block}
+.rb-title{font-size:13px;font-weight:700;margin-bottom:3px}
+.rb-sub{font-size:11px;color:var(--light);margin-bottom:9px}
+.rb-acts{display:flex;gap:7px}
+.rb-yes{flex:2;background:var(--accent);color:var(--black);border:none;border-radius:8px;padding:9px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:700;cursor:pointer}
+.rb-no{flex:1;background:rgba(255,255,255,.08);color:var(--light);border:none;border-radius:8px;padding:9px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:600;cursor:pointer}
+
+/* ── WORKER SELECT ── */
+.ws{padding:18px 15px}
+.s-lbl{font-size:10px;font-weight:700;letter-spacing:.25em;text-transform:uppercase;color:var(--light);margin-bottom:4px}
+.s-h{font-size:21px;font-weight:700;color:var(--black);line-height:1.2;margin-bottom:4px}
+.s-meta{font-size:12px;color:var(--muted);font-weight:500;margin-bottom:18px}
+.wgrid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.wbtn{background:var(--card);border:2px solid var(--rule);border-radius:13px;padding:15px 10px 12px;display:flex;flex-direction:column;align-items:center;gap:5px;cursor:pointer;font-family:'Montserrat',sans-serif;transition:all .14s}
+.wbtn:active{transform:scale(.96)}
+.wbtn.sel{border-color:var(--accent);background:var(--accent-dim)}
+.wava{width:38px;height:38px;border-radius:50%;background:var(--bg);font-size:17px;display:flex;align-items:center;justify-content:center;border:2px solid var(--rule)}
+.wbtn.sel .wava{border-color:var(--accent);background:rgba(245,197,24,.2)}
+.wname{font-size:13px;font-weight:700;color:var(--black)}
+.wchk{width:15px;height:15px;border-radius:50%;border:2px solid var(--rule);display:flex;align-items:center;justify-content:center;font-size:9px;color:transparent;transition:all .14s}
+.wbtn.sel .wchk{background:var(--accent);border-color:var(--accent);color:var(--black)}
+.btn-primary{width:100%;background:var(--black);color:#fff;border:none;border-radius:13px;padding:14px;font-family:'Montserrat',sans-serif;font-size:14px;font-weight:700;cursor:pointer;margin-top:15px}
+.btn-primary:disabled{background:var(--rule);color:var(--light);cursor:not-allowed}
+
+/* ── SHIFT HEADER ── */
+.sinfo{background:var(--card);border-bottom:1px solid var(--rule);padding:9px 16px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:52px;z-index:200}
+.swho{font-size:13px;font-weight:700;color:var(--black)}
+.swho span{color:var(--muted);font-weight:500;font-size:11px;margin-left:5px}
+.schange{font-size:11px;font-weight:600;color:var(--muted);text-decoration:underline;cursor:pointer}
+
+/* ── SHIFT TABS ── */
+.shift-tabs{display:flex;background:var(--card);border-bottom:2px solid var(--rule);position:sticky;top:88px;z-index:199}
+.stab{flex:1;padding:9px 5px;font-size:11px;font-weight:700;text-align:center;cursor:pointer;color:var(--muted);border-bottom:3px solid transparent;transition:all .14s}
+.stab.active{color:var(--black);border-color:var(--accent)}
+.stab-badge{display:inline-block;background:var(--return-c);color:#fff;border-radius:20px;font-size:9px;font-weight:700;padding:1px 4px;margin-left:2px;vertical-align:middle}
+.stab-badge.grn{background:var(--issued)}
+
+.tabview{display:none}.tabview.active{display:block}
+
+/* ── ORDERS BAR ── */
+.orders-bar{display:flex;background:var(--black);align-items:center;padding:6px 12px;gap:0}
+.ob-item{display:flex;align-items:center;gap:5px;flex:1;justify-content:center}
+.ob-item:not(:last-child){border-right:1px solid rgba(255,255,255,.1);padding-right:0;margin-right:0}
+.ob-n{font-size:15px;font-weight:700;color:#fff;line-height:1}
+.ob-l{font-size:9px;font-weight:600;color:var(--muted)}
+.ob-item.pen .ob-n{color:var(--accent)}
+.ob-item.iss .ob-n{color:var(--issued)}
+.ob-item.ret .ob-n{color:var(--ret)}
+
+/* ── ADD FORM ── */
+.add-form{background:var(--card);border-bottom:2px solid var(--rule);padding:11px 15px 13px}
+.add-form-title{font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:9px;display:flex;align-items:center;justify-content:space-between}
+.add-collapse{font-size:11px;font-weight:600;color:var(--muted);cursor:pointer;text-decoration:underline;letter-spacing:0;text-transform:none}
+.flbl{font-size:9px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:var(--light);margin-bottom:3px;display:block}
+
+/* Segment */
+.seg{display:flex;border:2px solid var(--rule);border-radius:9px;overflow:hidden;background:var(--bg)}
+.sbtn{flex:1;border:none;background:none;font-family:'Montserrat',sans-serif;font-size:10px;font-weight:700;color:var(--muted);padding:7px 3px;cursor:pointer;text-align:center;transition:all .12s}
+.sbtn:not(:last-child){border-right:1px solid var(--rule)}
+.sbtn.act{background:var(--black);color:#fff}
+.sbtn.act.c{background:var(--client)}.sbtn.act.y{background:var(--yandex)}.sbtn.act.o{background:var(--our)}
+
+/* Order select */
+.order-sel-wrap{position:relative}
+.order-sel{width:100%;border:2px solid var(--rule);border-radius:9px;background:var(--bg);padding:8px 26px 8px 10px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:600;color:var(--black);appearance:none;-webkit-appearance:none;cursor:pointer}
+.order-sel:focus{outline:none;border-color:var(--accent);background:var(--card)}
+.order-sel-arr{position:absolute;right:8px;top:50%;transform:translateY(-50%);pointer-events:none;color:var(--light);font-size:11px}
+
+/* Order info */
+.order-info{background:var(--bg);border:1px solid var(--rule);border-radius:7px;padding:6px 9px;margin-top:4px;display:none;font-size:11px}
+.order-info.show{display:block}
+.oi-row{display:flex;justify-content:space-between;margin-bottom:2px}
+.oi-row:last-child{margin-bottom:0}
+.oi-lbl{color:var(--light);font-weight:600;font-size:10px}
+.oi-val{color:var(--black);font-weight:700;font-family:'JetBrains Mono',monospace;font-size:11px}
+
+/* Pending orders chips */
+.added-orders-list{display:flex;flex-wrap:wrap;gap:3px;margin-top:5px;min-height:22px}
+.ao-tag{display:inline-flex;align-items:center;gap:3px;background:var(--accent-dim);border:1px solid rgba(245,197,24,.45);border-radius:5px;padding:2px 7px;font-size:11px;font-weight:700;color:var(--black)}
+.ao-client{font-size:9px;color:var(--muted);font-weight:500;margin-left:1px}
+.ao-del{cursor:pointer;color:var(--muted);font-size:13px;line-height:1;margin-left:2px}
+.ao-empty{font-size:11px;color:var(--light);font-style:italic}
+.add-order-row{display:flex;gap:5px;align-items:flex-end;margin-top:5px}
+.add-order-row .order-sel-wrap{flex:1}
+.ao-add-btn{flex-shrink:0;width:36px;height:35px;border-radius:8px;border:none;background:var(--black);color:#fff;font-size:17px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.ao-add-btn:disabled{background:var(--rule);color:var(--light);cursor:not-allowed}
+
+/* Operation buttons — hidden for list orders, shown for "other" */
+.op-section{display:none}
+.op-section.show{display:block}
+.opg{display:flex;gap:5px}
+.opb{flex:1;border:2px solid var(--rule);background:var(--card);border-radius:7px;padding:6px 3px;font-family:'Montserrat',sans-serif;font-size:10px;font-weight:700;color:var(--muted);cursor:pointer;text-align:center;transition:all .12s}
+.opb.act{border-color:var(--accent);background:var(--accent-dim);color:var(--black)}
+.opb.auto{border-color:var(--issue);background:var(--issue-dim);color:#5b21b6}
+
+/* Date + Time + Comment */
+.dtc-row{display:grid;grid-template-columns:110px 90px 1fr;gap:7px;align-items:start;margin-top:7px}
+.field-g{display:flex;flex-direction:column}
+.date-sel{border:2px solid var(--rule);border-radius:9px;background:var(--bg);padding:6px 7px;font-family:'Montserrat',sans-serif;font-size:11px;font-weight:600;color:var(--black);appearance:none;-webkit-appearance:none;width:100%;text-align:center}
+.date-sel:focus{outline:none;border-color:var(--accent)}
+.date-sel.mod{border-color:#FF6B35;background:rgba(255,107,53,.06)}
+.time-inp{border:2px solid var(--accent);border-radius:9px;background:rgba(245,197,24,.06);padding:6px 7px;font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:var(--black);width:100%;text-align:center}
+.time-inp:focus{outline:none;border-color:var(--black);background:var(--card)}
+.inp-hint{font-size:9px;color:var(--muted);font-weight:500;margin-top:2px;text-align:center}
+.comment-inp{border:2px solid var(--rule);border-radius:9px;background:var(--bg);padding:6px 9px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:500;color:var(--black);resize:none;width:100%;height:36px}
+.comment-inp:focus{outline:none;border-color:var(--accent)}
+.add-btn{width:100%;height:41px;border-radius:11px;border:none;background:var(--accent);color:var(--black);font-size:13px;cursor:pointer;font-weight:700;font-family:'Montserrat',sans-serif;margin-top:7px}
+.add-btn:active{transform:scale(.98)}
+.add-btn:disabled{background:var(--rule);color:var(--light);cursor:not-allowed}
+
+/* ── LOG TABLE ── */
+.tarea{padding:11px 15px 90px}
+.tarea-hd{font-size:10px;font-weight:700;letter-spacing:.17em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;justify-content:space-between}
+.tarea-cnt{font-size:10px;font-weight:600;color:var(--light)}
+.ltbl{width:100%;border-collapse:collapse}
+.ltbl thead th{font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--light);padding:0 4px 6px;text-align:left;border-bottom:1px solid var(--rule)}
+.ltbl thead th.act{width:22px;text-align:center}
+.lrow{border-bottom:1px solid var(--rule);animation:rowIn .2s ease}
+.lrow td{padding:7px 4px;vertical-align:middle}
+.lrow-done td{opacity:.5}
+
+.tchip{display:inline-flex;padding:3px 6px;border-radius:20px;font-size:10px;font-weight:700;white-space:nowrap}
+.tchip.client{background:var(--client-dim);color:#1a8a4a}
+.tchip.yandex{background:var(--yandex-dim);color:#b84a1a}
+.tchip.our{background:var(--our-dim);color:#1a6fa0}
+.ochip{display:inline-flex;padding:3px 5px;border-radius:5px;font-size:9px;font-weight:700;white-space:nowrap}
+.ochip.issue{background:var(--issue-dim);color:#5b21b6}
+.ochip.return{background:var(--return-dim);color:#9d174d}
+.ochip.pickup{background:var(--our-dim);color:#1a6fa0}
+.ochip.dropoff{background:var(--return-dim);color:#9d174d}
+.ochip.both{background:rgba(100,100,200,.1);color:#3344aa}
+
+.onum{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;color:var(--black)}
+.time-chip{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;color:var(--muted);background:var(--bg);padding:2px 4px;border-radius:4px;white-space:nowrap}
+.time-rec{font-size:9px;font-weight:500;color:var(--light);font-family:'JetBrains Mono',monospace;display:block;margin-top:1px}
+.date-chip{font-size:9px;font-weight:600;display:block;margin-top:1px}
+
+.order-tags{display:flex;flex-wrap:wrap;gap:2px}
+.order-tag{display:inline-flex;align-items:center;gap:2px;background:var(--bg);border:1px solid var(--rule);border-radius:4px;padding:2px 5px;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;color:var(--black);line-height:1.3}
+.order-tag .tag-client{font-family:'Montserrat',sans-serif;font-size:9px;color:var(--muted);font-weight:500;display:block}
+
+.dbtn{width:22px;height:22px;border-radius:5px;border:1px solid var(--rule);background:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--light);margin:auto}
+.dbtn:active{background:#fee;color:#c33}
+.empty-st{text-align:center;padding:22px 18px;color:var(--light)}
+.empty-st-ico{font-size:28px;margin-bottom:5px}
+.empty-st-txt{font-size:12px;font-weight:500}
+
+/* ── GROUP HEADER IN TABLE ── */
+.tg-hdr td{background:var(--bg);font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding:5px 4px;border-bottom:1px solid var(--rule)}
+
+/* ── SUBMIT FOOTER ── */
+.sub-footer{position:fixed;bottom:0;left:0;right:0;background:var(--card);border-top:1px solid var(--rule);padding:9px 15px 12px;z-index:198;box-shadow:0 -4px 14px rgba(0,0,0,.08)}
+.sub-btn{width:100%;background:var(--black);color:#fff;border:none;border-radius:11px;padding:13px;font-family:'Montserrat',sans-serif;font-size:13px;font-weight:700;cursor:pointer}
+.sub-btn:active{background:#333}
+.sub-btn:disabled{background:var(--rule);color:var(--light);cursor:not-allowed}
+.sub-hint{font-size:10px;color:var(--light);text-align:center;margin-top:3px}
+
+/* ── ORDERS TAB ── */
+.orders-tab-content{padding:11px 15px 90px}
+.osummary{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:11px}
+.osc{background:var(--card);border-radius:9px;padding:9px 7px;border:1px solid var(--rule);text-align:center}
+.osc-n{font-size:20px;font-weight:700;color:var(--black);line-height:1}
+.osc-l{font-size:8px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:var(--light);margin-bottom:3px}
+.order-card{background:var(--card);border-radius:11px;border:1px solid var(--rule);padding:10px 12px;margin-bottom:6px;border-left:4px solid var(--rule)}
+.order-card.pending{border-left-color:var(--pending)}
+.order-card.issued{border-left-color:var(--issued)}
+.order-card.return-due{border-left-color:var(--ret)}
+.order-card.returned{border-left-color:var(--issued)}
+.oc-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:3px}
+.oc-id{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:var(--black)}
+.oc-status{font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px}
+.oc-status.pending{background:rgba(245,197,24,.15);color:#a07800}
+.oc-status.issued{background:rgba(46,204,113,.15);color:#1a8a4a}
+.oc-status.return-due{background:rgba(61,155,233,.15);color:#1a6fa0}
+.oc-status.returned{background:rgba(46,204,113,.15);color:#1a8a4a}
+.oc-client{font-size:12px;font-weight:600;color:var(--text);margin-bottom:3px}
+.oc-meta{display:flex;gap:8px;font-size:10px;color:var(--muted);flex-wrap:wrap}
+.sec-lbl{font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--light);margin:10px 0 6px}
+
+/* ── SUCCESS ── */
+.suc-screen{display:none;text-align:center;padding:55px 20px 40px}
+.suc-screen.active{display:block}
+.suc-ring{width:78px;height:78px;border-radius:50%;border:3px solid var(--client);background:var(--client-dim);font-size:32px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;animation:pop .35s cubic-bezier(.34,1.56,.64,1)}
+.suc-h{font-size:21px;font-weight:700;color:var(--black);margin-bottom:5px}
+.suc-sub{font-size:12px;color:var(--muted);margin-bottom:18px}
+.suc-sum{background:var(--card);border:1px solid var(--rule);border-radius:12px;padding:13px 15px;text-align:left;margin-bottom:18px}
+.sr{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--rule)}
+.sr:last-child{border-bottom:none}
+.sr-l{font-size:11px;color:var(--muted)}
+.sr-v{font-size:12px;font-weight:700;color:var(--black)}
+.btn-again{width:100%;background:var(--accent);color:var(--black);border:none;border-radius:13px;padding:14px;font-family:'Montserrat',sans-serif;font-size:14px;font-weight:700;cursor:pointer}
+
+/* ── VERTICAL VISITOR BUTTONS ── */
+.vis-btns{display:flex;flex-direction:column;gap:8px}
+.vbtn{width:100%;border:2px solid var(--rule);background:var(--card);border-radius:12px;padding:14px 16px;font-family:'Montserrat',sans-serif;font-size:15px;font-weight:700;color:var(--text);cursor:pointer;text-align:left;transition:all .14s;display:flex;align-items:center;gap:10px}
+.vbtn:active{transform:scale(.98)}
+.vbtn.act{color:#fff;border-color:transparent}
+.vbtn.act.c{background:var(--client)}
+.vbtn.act.y{background:var(--yandex)}
+.vbtn.act.o{background:var(--our)}
+/* ── TIME+COMMENT ROW ── */
+.tc2-row{display:flex;gap:8px;align-items:flex-end;margin-top:7px}
+.tc2-row .field-g:first-child{flex:0 0 90px}
+/* ── COMPACT DATE ── */
+.date-compact-row{margin-top:5px;margin-bottom:2px}
+.date-compact-lbl{font-size:11px;color:var(--muted);font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:4px;padding:3px 0;user-select:none}
+.date-compact-lbl:hover{color:var(--black)}
+.date-compact-picker{margin-top:5px}
+/* ── TOAST ── */
+.toast{position:fixed;top:62px;left:50%;transform:translateX(-50%);background:var(--black);color:#fff;padding:10px 22px;border-radius:22px;font-size:13px;font-weight:700;z-index:999;opacity:0;transition:opacity .25s;pointer-events:none;white-space:nowrap;border:2px solid var(--accent)}
+.toast.show{opacity:1}
+/* ── TAP ORDER LIST ── */
+.order-tap-list{margin-top:5px;display:flex;flex-direction:column;gap:3px}
+.otap{display:flex;align-items:center;justify-content:space-between;background:var(--bg);border:2px solid var(--rule);border-radius:9px;padding:8px 11px;cursor:pointer;transition:all .12s;-webkit-tap-highlight-color:transparent}
+.otap:active{transform:scale(.98)}
+.otap.sel{background:var(--accent-dim);border-color:var(--accent)}
+.otap-left{display:flex;flex-direction:column;gap:1px}
+.otap-id{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:var(--black)}
+.otap-client{font-size:11px;color:var(--muted);font-weight:500}
+.otap-badge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;white-space:nowrap}
+.otap-badge.issue{background:var(--issue-dim);color:#5b21b6}
+.otap-badge.ret{background:var(--return-dim);color:#9d174d}
+.otap-badge.ov{background:rgba(231,76,60,.15);color:#c0392b}
+.otap-other{background:rgba(255,107,53,.1);border-color:var(--yandex);color:var(--yandex)}
+.otap-check{width:22px;height:22px;border-radius:50%;border:2px solid var(--rule);display:flex;align-items:center;justify-content:center;font-size:11px;color:transparent;flex-shrink:0;transition:all .12s}
+.otap.sel .otap-check{background:var(--accent);border-color:var(--accent);color:var(--black)}
+.otap-sep{font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--light);padding:4px 0 1px}
+
+/* ── OVERDUE ── */
+.badge-overdue{display:inline-block;background:rgba(231,76,60,.15);color:#c0392b;border-radius:20px;font-size:10px;font-weight:700;padding:2px 7px}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
+.ob-item.ov .ob-n{color:#E74C3C}
+.order-card.overdue{border-left-color:#E74C3C}
+.oc-status.overdue{background:rgba(231,76,60,.15);color:#c0392b;animation:pulse 2s infinite}
+</style>
+</head>
+<body>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<!-- CONFIRM MODAL -->
+<div class="ovl" id="ovl" onclick="closeModal(event)">
+  <div class="modal">
+    <div class="modal-h">Завершить смену?</div>
+    <div class="modal-s">Проверьте итоги перед отправкой</div>
+    <div id="modalRows"></div>
+    <div class="macts">
+      <button class="mcancel" onclick="closeModal()">Отмена</button>
+      <button class="mok" onclick="confirmSubmit()">✓ Отправить</button>
+    </div>
+  </div>
+</div>
+
+<!-- HEADER -->
+<div class="hdr">
+  <div class="hdr-logo">Ameli <em>Rental</em> · Склад</div>
+  <div class="pill day" id="pill">☀️ День</div>
+</div>
+<div class="save-banner" id="saveBanner">
+  <div class="save-dot"></div>
+  <span id="saveText">Черновик сохранён</span>
+</div>
+
+<!-- LOADING -->
+<div id="loadingScr" style="padding:60px 18px;text-align:center">
+  <div style="width:32px;height:32px;border:3px solid #e8e8e4;border-top-color:#F5C518;border-radius:50%;animation:spin .7s linear infinite;margin:0 auto 13px"></div>
+  <div style="font-size:13px;font-weight:600;color:#888">Загрузка заказов...</div>
+</div>
+
+<!-- ═══ WORKER SELECT ═══ -->
+<div class="screen" id="s-worker">
+  <div class="ws">
+    <div class="s-lbl">Начало смены</div>
+    <div class="s-h">Кто сегодня<br>на складе?</div>
+    <div class="s-meta" id="dateLine">—</div>
+    <div class="restore-banner" id="restoreBanner">
+      <div class="rb-title">🔄 Найдена незакрытая смена</div>
+      <div class="rb-sub" id="restoreInfo">—</div>
+      <div class="rb-acts">
+        <button class="rb-yes" onclick="restoreShift()">✓ Восстановить</button>
+        <button class="rb-no" onclick="discardDraft()">Удалить</button>
+      </div>
+    </div>
+    <div class="wgrid" id="wgrid"></div>
+    <button class="btn-primary" id="startBtn" disabled onclick="startShift()">Начать смену →</button>
+  </div>
+</div>
+
+<!-- ═══ SHIFT ═══ -->
+<div class="screen" id="s-shift">
+  <div class="sinfo">
+    <div class="swho" id="shiftWho">—</div>
+    <div class="schange" onclick="goBack()">сменить</div>
+  </div>
+  <div class="shift-tabs">
+    <div class="stab active" id="stab-log" onclick="switchShiftTab('log')">📋 Журнал смены</div>
+    <div class="stab" id="stab-orders" onclick="switchShiftTab('orders')">
+      📦 Заказы<span class="stab-badge" id="pendingBadge" style="display:none">0</span>
+    </div>
+  </div>
+
+  <!-- ── LOG TAB ── -->
+  <div class="tabview active" id="tv-log">
+    <!-- orders status bar — compact single row -->
+    <div class="orders-bar">
+      <div class="ob-item pen"><div class="ob-n" id="bar-pending">0</div><div class="ob-l">ожид.</div></div>
+      <div class="ob-item iss"><div class="ob-n" id="bar-issued">0</div><div class="ob-l">выдано</div></div>
+      <div class="ob-item ret"><div class="ob-n" id="bar-returned">0</div><div class="ob-l">возврат</div></div>
+      <div class="ob-item ov"><div class="ob-n" id="bar-overdue">0</div><div class="ob-l">🔴 просроч.</div></div>
+    </div>
+
+    <!-- ADD FORM -->
+    <div class="add-form">
+      <div class="add-form-title">
+        + Добавить визит
+        <span class="add-collapse" id="collapseBtn" onclick="toggleForm()">свернуть ▲</span>
+      </div>
+      <div id="formBody">
+        <!-- Visitor type — vertical large buttons -->
+        <div style="margin-bottom:10px">
+          <label class="flbl">Кто приехал</label>
+          <div class="vis-btns">
+            <button class="vbtn c" onclick="setVisitor('client',this)">🧑 Клиент</button>
+            <button class="vbtn y" onclick="setVisitor('yandex',this)">🚕 Курьер Яндекс</button>
+            <button class="vbtn o" onclick="setVisitor('our',this)">🚛 Наш курьер</button>
+          </div>
+        </div>
+
+        <!-- Orders (multi-tap) -->
+        <div style="margin-bottom:6px">
+          <label class="flbl">Заказы <span style="font-weight:500;letter-spacing:0;text-transform:none;color:var(--muted)">(тапни чтобы выбрать)</span></label>
+          <!-- Selected orders chips -->
+          <div class="added-orders-list" id="addedOrdersList">
+            <span class="ao-empty">Заказы не выбраны</span>
+          </div>
+          <!-- Tap-list of available orders -->
+          <div class="order-tap-list" id="orderTapList"></div>
+          <!-- hidden select kept for JS compatibility -->
+          <select id="orderSel" style="display:none" onchange="onOrderChange()">
+            <option value="">— выберите заказ —</option>
+          </select>
+        </div>
+
+        <!-- Operation — shown ONLY if "нет в списке" is selected -->
+        <div class="op-section" id="opSection" style="margin-bottom:7px">
+          <label class="flbl">Операция <span style="font-weight:500;letter-spacing:0;text-transform:none;color:var(--muted)">(для «нет в списке»)</span></label>
+          <div class="opg" id="opGroup"></div>
+        </div>
+
+        <!-- Time + Comment + Date (pencil) -->
+        <div class="tc2-row">
+          <div class="field-g">
+            <label class="flbl">Время (МСК)</label>
+            <input class="time-inp" id="timeInp" type="time">
+          </div>
+          <div class="field-g" style="flex:1">
+            <label class="flbl">Комментарий</label>
+            <textarea class="comment-inp" id="commentInp" placeholder="необязательно..."></textarea>
+          </div>
+        </div>
+        <!-- Date — compact, hidden by default -->
+        <div class="date-compact-row">
+          <span class="date-compact-lbl" id="dateLbl" onclick="toggleDatePicker()">
+            📅 <span id="dateLblText">—</span> ✏️
+          </span>
+          <div class="date-compact-picker" id="datePicker" style="display:none">
+            <select class="date-sel" id="dateInp" onchange="onDateChange()"></select>
+          </div>
+        </div>
+
+        <button class="add-btn" id="addBtn" onclick="addVisit()" disabled>＋ Добавить визит</button>
+      </div>
+    </div>
+
+    <!-- VISITS TABLE -->
+    <div class="tarea">
+      <div class="tarea-hd">
+        Визиты смены
+        <span class="tarea-cnt" id="tarea-cnt"></span>
+      </div>
+      <table class="ltbl">
+        <thead><tr>
+          <th>Дата/Время</th><th>Кто</th><th>Операция</th><th>Заказы</th><th style="font-size:8px;color:var(--light)">Внесено</th><th class="act"></th>
+        </tr></thead>
+        <tbody id="logBody"></tbody>
+      </table>
+      <div class="empty-st" id="emptySt">
+        <div class="empty-st-ico">📋</div>
+        <div class="empty-st-txt">Добавьте первый визит смены</div>
+      </div>
+    </div>
+
+    <div class="sub-footer">
+      <button class="sub-btn" id="subBtn" onclick="openModal()">Закрыть смену ✓</button>
+      <div class="sub-hint" id="subHint">Визитов за смену: 0</div>
+    </div>
+  </div>
+
+  <!-- ── ORDERS TAB ── -->
+  <div class="tabview" id="tv-orders">
+    <div class="orders-tab-content">
+      <div class="osummary" id="ordersMini"></div>
+      <div id="ordersCards"></div>
+    </div>
+    <div class="sub-footer">
+      <button class="sub-btn" id="subBtn2" onclick="openModal()">Закрыть смену ✓</button>
+      <div class="sub-hint" id="subHint2"></div>
+    </div>
+  </div>
+</div><!-- /s-shift -->
+
+<!-- SUCCESS -->
+<div class="suc-screen" id="s-success">
+  <div class="suc-ring">✓</div>
+  <div class="suc-h">Смена закрыта!</div>
+  <div class="suc-sub" id="sucSub">—</div>
+  <div class="suc-sum" id="sucSum"></div>
+  <button class="btn-again" onclick="resetAll()">Начать новую смену</button>
+</div>
+
+<script src="config.js"></script>
+<script>
+// ═══════════════════
+// URL берётся из файла config.js (лежит рядом с этим файлом)
+const MSK_OFFSET  = 3;
+const NIGHT_START = 22, NIGHT_END = 9;
+const DRAFT_KEY   = 'wh_draft';
+const AUTOSAVE_INT= 30000;
+const ICONS = ['👩','👨','🧑','👩','👩','👨'];
+const DAYS_SHORT  = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+// ═══════════════════
+
+const OPS_CLIENT = [{id:'issue',label:'📦 Выдача'},{id:'return',label:'🔄 Возврат'}];
+const OPS_YANDEX = [{id:'issue',label:'📦 Выдача'},{id:'return',label:'🔄 Возврат'}];
+const OPS_OUR    = [{id:'pickup',label:'📥 Получение'},{id:'dropoff',label:'📤 Возврат'},{id:'both',label:'🔃 Оба'}];
+const OPS = {client:OPS_CLIENT,yandex:OPS_YANDEX,our:OPS_OUR};
+const VIS_LBL = {client:'Клиент',yandex:'Яндекс',our:'Наш курьер'};
+const OP_LBL  = {issue:'Выдача',return:'Возврат',pickup:'Получение',dropoff:'Возврат',both:'Получ.+Возврат'};
+
+let workers=[], orders=[], visits=[];
+let worker=null, visitor=null, operation=null, shiftStart=null;
+let pendingOrders=[];
+let autosaveTimer=null, formOpen=true, currentShiftTab='log';
+let hasOther=false;
+// Заказы уже обработанные сегодня (из лога на сервере)
+let serverIssuedToday   = new Set();
+let serverReturnedToday = new Set(); // whether any "__other__" is in pendingOrders
+
+// ── INIT ──
+async function init(){
+  updatePill(); setInterval(updatePill,60000);
+  renderDateLine(); populateDatePicker();
+  await loadData();
+  document.getElementById('loadingScr').style.display='none';
+  checkForDraft();
+  showScreen('s-worker');
+}
+
+// Moscow time helpers
+function mskNow(){ return new Date(Date.now()+MSK_OFFSET*3600000); }
+function mskHour(){ return mskNow().getUTCHours(); }
+function isNight(){ const h=mskHour(); return h>=NIGHT_START||h<NIGHT_END; }
+function nowTime(){ const n=mskNow(); return pad(n.getUTCHours())+':'+pad(n.getUTCMinutes()); }
+function pad(n){ return String(n).padStart(2,'0'); }
+function todayMsk(){ return mskNow().toISOString().split('T')[0]; }
+
+function updatePill(){
+  const p=document.getElementById('pill');
+  p.className='pill '+(isNight()?'night':'day');
+  p.textContent=isNight()?'🌙 Ночь':'☀️ День';
+}
+function renderDateLine(){
+  document.getElementById('dateLine').textContent=
+    new Date().toLocaleDateString('ru',{weekday:'long',day:'numeric',month:'long',timeZone:'Europe/Moscow'})+
+    ' · '+(isNight()?'Ночная смена':'Дневная смена');
+}
+function populateDatePicker(){
+  const sel=document.getElementById('dateInp');
+  if(!sel) return;
+  sel.innerHTML='';
+  const today=mskNow();
+  for(let i=0;i<4;i++){
+    const d=new Date(today.getTime()-i*864e5);
+    const opt=document.createElement('option');
+    opt.value=d.toISOString().split('T')[0];
+    const dy=DAYS_SHORT[d.getUTCDay()];
+    const ds=d.toLocaleDateString('ru',{day:'numeric',month:'short',timeZone:'UTC'});
+    opt.textContent=`${dy}, ${ds}`;
+    if(i===0)opt.selected=true;
+    sel.appendChild(opt);
+  }
+  updateDateLabel();
+}
+function updateDateLabel(){
+  const sel=document.getElementById('dateInp');
+  const lbl=document.getElementById('dateLblText');
+  if(!sel||!lbl) return;
+  lbl.textContent=sel.options[sel.selectedIndex]?.textContent||'—';
+}
+function toggleDatePicker(){
+  const p=document.getElementById('datePicker');
+  if(p) p.style.display=p.style.display==='none'?'block':'none';
+}
+function onDateChange(){
+  updateDateLabel();
+  // close picker after picking
+  const p=document.getElementById('datePicker');
+  if(p) p.style.display='none';
+}
+function showToast(msg, color){
+  const t=document.getElementById('toast');
+  if(!t) return;
+  t.textContent=msg;
+  t.style.borderColor=color||'var(--accent)';
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'),2200);
+}
+
+// ── LOAD ──
+async function loadData(){
+  if(SCRIPT_URL.includes('YOUR_')){
+    workers=[{name:'Оля'},{name:'Тамилла'},{name:'Максим'},{name:'Гоша'},{name:'Алевтина'},{name:'Наташа'}];
+    orders=demoOrders();
+  } else {
+    try{
+      const r=await fetch(SCRIPT_URL+'?action=getData&t='+Date.now());
+      const j=await r.json();
+      workers=j.workers||[]; orders=j.orders||[];
+      // Сохраняем что уже обработано сегодня из лога
+      serverIssuedToday   = new Set(j.processedToday?.issued   || []);
+      serverReturnedToday = new Set(j.processedToday?.returned || []);
+    }catch(e){
+      workers=[{name:'Оля'},{name:'Тамилла'},{name:'Максим'},{name:'Гоша'},{name:'Алевтина'},{name:'Наташа'}];
+      orders=[];
+    }
+  }
+  renderWorkers(); populateOrders();
+}
+
+function demoOrders(){
+  const d=p=>{const dt=new Date();dt.setDate(dt.getDate()+p);return dt.toLocaleDateString('ru',{day:'numeric',month:'short'})};
+  return[
+    {id:'A-4521',client:'Иванова Мария',returnDate:d(3),delivery:'Наша доставка',status:'pending',type:'issue'},
+    {id:'A-4522',client:'Петров Александр',returnDate:d(0),delivery:'Самовывоз',status:'pending',type:'return'},
+    {id:'A-4523',client:'Сидорова Анна',returnDate:d(5),delivery:'Наша доставка',status:'pending',type:'issue'},
+    {id:'B-1034',client:'Козлов Дмитрий',returnDate:d(0),delivery:'Самовывоз',status:'pending',type:'return'},
+    {id:'B-1035',client:'Новикова Елена',returnDate:d(7),delivery:'Самовывоз',status:'pending',type:'issue'},
+  ];
+}
+
+// ── DRAFT ──
+function saveDraft(){
+  if(!worker||!visits.length) return;
+  const draft={worker,shiftStart:shiftStart?.toISOString()||null,visits,isNight:isNight()?'Ночь':'День',savedAt:new Date().toISOString()};
+  localStorage.setItem(DRAFT_KEY,JSON.stringify(draft));
+  if(!SCRIPT_URL.includes('YOUR_')){
+    fetch(SCRIPT_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({...draft,isDraft:true,shiftDate:new Date().toLocaleDateString('ru'),totalEntries:visits.length,entries:visits})}).catch(()=>{});
+  }
+  const b=document.getElementById('saveBanner');
+  document.getElementById('saveText').textContent='Черновик сохранён в '+nowTime()+' МСК';
+  b.classList.add('show'); setTimeout(()=>b.classList.remove('show'),3000);
+}
+function startAutosave(){ stopAutosave(); autosaveTimer=setInterval(saveDraft,AUTOSAVE_INT); }
+function stopAutosave(){ if(autosaveTimer){clearInterval(autosaveTimer);autosaveTimer=null;} }
+
+function checkForDraft(){
+  const raw=localStorage.getItem(DRAFT_KEY);
+  if(!raw) return;
+  try{
+    const d=JSON.parse(raw);
+    if(!d.worker||!d.visits?.length) return;
+    const hrs=Math.round((Date.now()-new Date(d.savedAt))/360000)/10;
+    const el=document.getElementById('restoreBanner');
+    document.getElementById('restoreInfo').textContent=`${d.worker} · ${d.visits.length} визитов · ${hrs} ч. назад`;
+    el.classList.add('show'); el.dataset.draft=raw;
+  }catch(e){ localStorage.removeItem(DRAFT_KEY); }
+}
+function restoreShift(){
+  const raw=document.getElementById('restoreBanner').dataset.draft;
+  if(!raw) return;
+  const draft=JSON.parse(raw);
+  worker=draft.worker; visits=draft.visits||[];
+  shiftStart=draft.shiftStart?new Date(draft.shiftStart):new Date();
+  document.querySelectorAll('.wbtn').forEach(b=>{ if(b.querySelector('.wname')?.textContent===worker)b.classList.add('sel'); });
+  document.getElementById('restoreBanner').classList.remove('show');
+  document.getElementById('shiftWho').innerHTML=worker+`<span>· восстановлено</span>`;
+  showScreen('s-shift');
+  pendingOrders=[]; renderPendingOrders();
+  setVisitor('client',document.querySelector('.sbtn.c'));
+  document.getElementById('timeInp').value=nowTime();
+  renderTable(); updateOrdersBar(); renderOrderCards();
+  startAutosave();
+}
+function discardDraft(){ localStorage.removeItem(DRAFT_KEY); document.getElementById('restoreBanner').classList.remove('show'); }
+
+// ── WORKERS ──
+function renderWorkers(){
+  document.getElementById('wgrid').innerHTML=workers.map((w,i)=>`
+    <button class="wbtn" onclick="selWorker('${w.name}',this)">
+      <div class="wava">${ICONS[i%ICONS.length]}</div>
+      <div class="wname">${w.name}</div>
+      <div class="wchk">✓</div>
+    </button>`).join('');
+}
+function selWorker(name,el){
+  document.querySelectorAll('.wbtn').forEach(b=>b.classList.remove('sel'));
+  el.classList.add('sel'); worker=name;
+  document.getElementById('startBtn').disabled=false;
+}
+function startShift(){
+  shiftStart=new Date();
+  document.getElementById('shiftWho').innerHTML=worker+`<span>· ${nowTime()} МСК</span>`;
+  showScreen('s-shift');
+  pendingOrders=[]; renderPendingOrders();
+  setVisitor('client',document.querySelector('.vbtn.c'));
+  document.getElementById('timeInp').value=nowTime();
+  updateDateLabel();
+  refreshOrdersFromServer().then(()=>{ updateOrdersBar(); renderOrderCards(); });
+  startAutosave();
+  startOrdersRefresh();
+}
+
+// ── SHIFT TABS ──
+function switchShiftTab(tab){
+  currentShiftTab=tab;
+  document.querySelectorAll('.stab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('stab-'+tab).classList.add('active');
+  document.querySelectorAll('.tabview').forEach(v=>v.classList.remove('active'));
+  document.getElementById('tv-'+tab).classList.add('active');
+}
+function toggleForm(){
+  formOpen=!formOpen;
+  document.getElementById('formBody').style.display=formOpen?'block':'none';
+  document.getElementById('collapseBtn').textContent=formOpen?'свернуть ▲':'развернуть ▼';
+}
+
+function populateOrders(){
+  // Keep hidden select in sync for any legacy code
+  const sel=document.getElementById('orderSel');
+  sel.innerHTML='<option value="">— выберите заказ —</option>';
+
+  const {issuedIds, returnedIds}=getSessionStatuses();
+
+  const toIssue  = orders.filter(o=>o.type==='issue'  && !issuedIds.has(o.id) && !returnedIds.has(o.id) && !o.overdue);
+  const toReturn = orders.filter(o=>o.type==='return' && !returnedIds.has(o.id) && !issuedIds.has(o.id) && !o.overdue);
+  const overdue  = orders.filter(o=>o.overdue && !issuedIds.has(o.id) && !returnedIds.has(o.id));
+
+  // Build tap-list
+  const tl=document.getElementById('orderTapList');
+  let html='';
+
+  if(overdue.length){
+    html+=`<div class="otap-sep">🔴 Просрочены</div>`;
+    html+=overdue.map(o=>tapRow(o,'ov')).join('');
+  }
+  if(toIssue.length){
+    html+=`<div class="otap-sep">📦 К выдаче</div>`;
+    html+=toIssue.map(o=>tapRow(o,'issue')).join('');
+  }
+  if(toReturn.length){
+    html+=`<div class="otap-sep">🔄 К возврату</div>`;
+    html+=toReturn.map(o=>tapRow(o,'ret')).join('');
+  }
+  html+=`<div class="otap otap-other" onclick="tapOrder('__other__')">
+    <div class="otap-left"><div class="otap-id">⚠️ Нет в списке</div></div>
+    <div class="otap-check" id="otap-chk-__other__"></div>
+  </div>`;
+  tl.innerHTML=html;
+
+  updateTapSelections();
+}
+
+function tapRow(o, badgeCls){
+  const label=badgeCls==='issue'?'Выдача':badgeCls==='ret'?'Возврат':'🔴 Просрочен';
+  return `<div class="otap" id="otap-${o.id}" onclick="tapOrder('${o.id}')">
+    <div class="otap-left">
+      <div class="otap-id">${o.id}</div>
+      <div class="otap-client">${o.client||''}</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:7px">
+      <span class="otap-badge ${badgeCls}">${label}</span>
+      <div class="otap-check" id="otap-chk-${o.id}"></div>
+    </div>
+  </div>`;
+}
+
+function tapOrder(id){
+  const already=pendingOrders.find(o=>o.id===id);
+  if(already){
+    // deselect
+    removeOrderFromPending(id);
+    return;
+  }
+  let order;
+  if(id==='__other__'){
+    order={id:'__other__',client:'нет в списке',type:null};
+    hasOther=true;
+  } else {
+    const found=orders.find(o=>o.id===id);
+    order=found
+      ?{id:found.id,client:found.client||'',type:found.type||null,returnDate:found.returnDate||'',delivery:found.delivery||''}
+      :{id,client:'',type:null};
+  }
+  pendingOrders.push(order);
+  renderPendingOrders();
+  document.getElementById('opSection').classList.toggle('show',hasOther);
+  if(hasOther) renderOps();
+  updateTapSelections();
+  checkReady();
+}
+
+function updateTapSelections(){
+  document.querySelectorAll('.otap').forEach(el=>{
+    const id=el.id?.replace('otap-','');
+    const chk=el.querySelector('.otap-check');
+    const isSel=pendingOrders.some(o=>o.id===id);
+    el.classList.toggle('sel',isSel);
+    if(chk) chk.textContent=isSel?'✓':'';
+  });
+}
+
+
+// ── AUTO-REFRESH ORDERS from server every 60s ──
+let ordersRefreshTimer=null;
+function startOrdersRefresh(){
+  stopOrdersRefresh();
+  ordersRefreshTimer=setInterval(refreshOrdersFromServer, 60000);
+}
+function stopOrdersRefresh(){ if(ordersRefreshTimer){clearInterval(ordersRefreshTimer);ordersRefreshTimer=null;} }
+
+async function refreshOrdersFromServer(){
+  if(SCRIPT_URL.includes('YOUR_')) return;
+  try{
+    const r=await fetch(SCRIPT_URL+'?action=getData&t='+Date.now());
+    const j=await r.json();
+    if(j.orders){
+      orders=j.orders;
+      serverIssuedToday   = new Set(j.processedToday?.issued   || []);
+      serverReturnedToday = new Set(j.processedToday?.returned || []);
+      populateOrders();
+      updateOrdersBar();
+      renderOrderCards();
+    }
+  }catch(e){ /* silent fail */ }
+}
+
+// Объединяет: что обработано сегодня в логе (серверные данные) + текущая сессия
+function getSessionStatuses(){
+  const issuedIds   = new Set(serverIssuedToday);
+  const returnedIds = new Set(serverReturnedToday);
+  // Добавляем из текущей сессии
+  visits.forEach(v=>{
+    (v.orders||[]).forEach(o=>{
+      if(!o.id||o.id==='__other__') return;
+      if(['issue','pickup'].includes(v.operation))   issuedIds.add(o.id);
+      if(['return','dropoff','both'].includes(v.operation)) returnedIds.add(o.id);
+    });
+  });
+  return {issuedIds, returnedIds};
+}
+
+function onOrderChange(){
+  const sel=document.getElementById('orderSel');
+  const id=sel.value;
+  const info=document.getElementById('orderInfo');
+  const aoBtn=document.getElementById('aoAddBtn');
+  const opSec=document.getElementById('opSection');
+
+  if(!id){ info.classList.remove('show'); aoBtn.disabled=true; opSec.classList.remove('show'); checkReady(); return; }
+
+  if(id==='__other__'){
+    info.classList.remove('show'); aoBtn.disabled=false;
+    opSec.classList.add('show');
+    renderOps();
+    checkReady(); return;
+  }
+
+  opSec.classList.remove('show'); // Hide op buttons for list orders
+  const o=orders.find(x=>x.id===id);
+  if(o){
+    document.getElementById('oi-client').textContent=o.client||'—';
+    document.getElementById('oi-return').textContent=o.returnDate||'—';
+    document.getElementById('oi-delivery').textContent=o.delivery||'—';
+    info.classList.add('show');
+    // Auto-set operation from order type
+    if(visitor){
+      const tOp=o.type==='issue'?'issue':'return';
+      const valid=OPS[visitor]||[];
+      if(valid.find(op=>op.id===tOp)){
+        operation=tOp;
+        document.querySelectorAll('.opb').forEach(b=>{b.classList.remove('act','auto');if(b.dataset.op===tOp)b.classList.add('auto');});
+      }
+    }
+  }
+  aoBtn.disabled=false;
+  checkReady();
+}
+
+function addOrderToVisit(){
+  const sel = document.getElementById('orderSel');
+  const id  = sel.value;
+  if(!id) return;
+  if(pendingOrders.find(o => o.id === id)) return; // no duplicates
+
+  let order;
+  if(id === '__other__'){
+    order = {id:'__other__', client:'нет в списке', type:null};
+    hasOther = true;
+  } else {
+    // Find full order object from loaded orders list
+    const found = orders.find(o => o.id === id);
+    order = found
+      ? {id: found.id, client: found.client||'', type: found.type||null, returnDate: found.returnDate||'', delivery: found.delivery||''}
+      : {id, client:'', type:null};
+  }
+
+  pendingOrders.push(order);
+  renderPendingOrders();
+  sel.value = '';
+  document.getElementById('orderInfo').classList.remove('show');
+  document.getElementById('aoAddBtn').disabled = true;
+  // Show op buttons only if "other" is in list
+  document.getElementById('opSection').classList.toggle('show', hasOther);
+  if(hasOther) renderOps();
+  checkReady();
+}
+
+function removeOrderFromPending(id){
+  pendingOrders=pendingOrders.filter(o=>o.id!==id);
+  hasOther=pendingOrders.some(o=>o.id==='__other__');
+  if(!hasOther){ document.getElementById('opSection').classList.remove('show'); if(operation&&OPS[visitor]?.find(op=>op.id===operation)===undefined)operation=null; }
+  renderPendingOrders(); updateTapSelections(); checkReady();
+}
+
+function renderPendingOrders(){
+  const list=document.getElementById('addedOrdersList');
+  if(!pendingOrders.length){ list.innerHTML='<span class="ao-empty">Заказы не выбраны</span>'; return; }
+  list.innerHTML=pendingOrders.map(o=>`
+    <div class="ao-tag">
+      <span>${o.id==='__other__'?'⚠️ нет в списке':o.id}</span>
+      ${o.client&&o.id!=='__other__'?`<span class="ao-client">${o.client}</span>`:''}
+      <span class="ao-del" onclick="removeOrderFromPending('${o.id}')">×</span>
+    </div>`).join('');
+}
+
+// ── VISITOR / OP ──
+function setVisitor(v,el){
+  visitor=v; operation=null;
+  document.querySelectorAll('.vbtn').forEach(b=>b.classList.remove('act'));
+  el.classList.add('act');
+  if(hasOther){ renderOps(); document.getElementById('opSection').classList.add('show'); }
+  const firstOrder=pendingOrders.find(o=>o.id&&o.id!=='__other__');
+  if(firstOrder&&firstOrder.type){ const tOp=firstOrder.type==='issue'?'issue':'return'; const valid=OPS[v]||[]; if(valid.find(op=>op.id===tOp)){operation=tOp;document.querySelectorAll('.opb').forEach(b=>{b.classList.remove('act','auto');if(b.dataset.op===tOp)b.classList.add('auto');});} }
+  checkReady();
+}
+function renderOps(){
+  document.getElementById('opGroup').innerHTML=(OPS[visitor]||[]).map(op=>
+    `<button class="opb" data-op="${op.id}" onclick="setOp('${op.id}',this)">${op.label}</button>`).join('');
+}
+function setOp(op,el){ operation=op; document.querySelectorAll('.opb').forEach(b=>b.classList.remove('act','auto')); el.classList.add('act'); checkReady(); }
+
+// Determine effective operation: derive from order types, no manual selection needed for list orders
+function getEffectiveOperation(){
+  const listOrders = pendingOrders.filter(o => o.id && o.id !== '__other__');
+  const hasOtherOrder = pendingOrders.some(o => o.id === '__other__');
+
+  // If only "other" orders — need manual op selection
+  if (!listOrders.length && hasOtherOrder) return operation || null;
+
+  if (!listOrders.length) return operation || null;
+
+  // Count issue vs return types among list orders
+  const issueCount  = listOrders.filter(o => o.type === 'issue').length;
+  const returnCount = listOrders.filter(o => o.type === 'return').length;
+
+  // All same type → use that type
+  if (issueCount > 0 && returnCount === 0) {
+    return visitor === 'our' ? 'pickup' : 'issue';
+  }
+  if (returnCount > 0 && issueCount === 0) {
+    return visitor === 'our' ? 'dropoff' : 'return';
+  }
+  // Mixed (both issue and return in one visit) → "both" for our courier, else "issue" as default
+  if (visitor === 'our') return 'both';
+  return 'issue';
+}
+
+function checkReady(){
+  const selectedInDropdown = document.getElementById('orderSel').value;
+  const hasSelected = pendingOrders.length > 0 || (selectedInDropdown && selectedInDropdown !== '');
+  // If "other" is selected/in list — also need manual operation
+  const needsOp = hasOther || selectedInDropdown === '__other__';
+  const ready = visitor && hasSelected && (!needsOp || operation);
+  document.getElementById('addBtn').disabled = !ready;
+}
+
+// ── ADD VISIT ──
+function addVisit(){
+  // Auto-add order from dropdown if it wasn't added via ＋ button
+  const selId = document.getElementById('orderSel').value;
+  if(selId && !pendingOrders.find(o=>o.id===selId)){
+    addOrderToVisit();
+  }
+
+  const op=getEffectiveOperation()||operation;
+  if(!visitor||!op||!pendingOrders.length) return;
+  const timeVal=document.getElementById('timeInp').value||nowTime();
+  const dateVal=document.getElementById('dateInp').value;
+  const comment=document.getElementById('commentInp').value.trim();
+
+  const visit={
+    n:visits.length+1,
+    visitor, operation:op,
+    orders:pendingOrders.map(o=>({id:o.id,client:o.client||'',returnDate:o.returnDate||'',delivery:o.delivery||''})),
+    // legacy compat
+    orderId:pendingOrders[0]?.id||null,
+    orderClient:pendingOrders[0]?.client||null,
+    orderReturnDate:pendingOrders[0]?.returnDate||null,
+    orderDelivery:pendingOrders[0]?.delivery||null,
+    comment:comment||null,
+    date:dateVal,
+    time:timeVal,
+    timeAuto:nowTime(),
+    dateAuto:todayMsk(),
+    ts:new Date().toISOString(),
+    night:isNight(),
+  };
+  visits.push(visit);
+  pendingOrders=[]; hasOther=false;
+  renderPendingOrders();
+  operation=null;
+  document.querySelectorAll('.opb').forEach(b=>b.classList.remove('act','auto'));
+  document.getElementById('opSection').classList.remove('show');
+  document.getElementById('orderSel').value='';
+  document.getElementById('orderInfo').classList.remove('show');
+  document.getElementById('aoAddBtn').disabled=true;
+  document.getElementById('commentInp').value='';
+  document.getElementById('timeInp').value=nowTime();
+  document.getElementById('dateInp').selectedIndex=0; updateDateLabel();
+  checkReady();
+  renderTable(); updateOrdersBar(); renderOrderCards();
+  populateOrders();
+  saveDraft();
+  showToast('✓ Визит записан', 'var(--client)');
+}
+
+// ── TABLE ──
+function renderTable(){
+  const tbody=document.getElementById('logBody');
+  const empty=document.getElementById('emptySt');
+  const cnt=document.getElementById('tarea-cnt');
+
+  const hint=visits.length
+    ? `${visits.length} ${pl(visits.length,'визит','визита','визитов')} за смену`
+    : 'Нет визитов — можно закрыть смену';
+  document.getElementById('subHint').textContent=hint;
+  document.getElementById('subHint2').textContent=hint;
+
+  if(!visits.length){
+    tbody.innerHTML=''; empty.style.display='block'; cnt.textContent='';
+    return;
+  }
+  empty.style.display='none';
+  cnt.textContent=visits.length+' '+pl(visits.length,'визит','визита','визитов');
+
+  const today=todayMsk();
+  // Separate active and done
+  const {issuedIds,returnedIds}=getSessionStatuses();
+  const isDoneVisit=v=>{
+    if(!v.orders||!v.orders.length) return false;
+    return v.orders.every(o=>o.id==='__other__'||issuedIds.has(o.id)||returnedIds.has(o.id));
+  };
+  const active=visits.filter(v=>!isDoneVisit(v));
+  const done=visits.filter(v=>isDoneVisit(v));
+
+  const rowHtml=v=>{
+    const showDate=v.date&&v.date!==today;
+    const dayName=v.date?DAYS_SHORT[new Date(v.date+'T12:00').getDay()]:'';
+    const datePart=showDate?`<span class="date-chip" style="color:#FF6B35">⚠️${dayName} ${new Date(v.date+'T12:00').toLocaleDateString('ru',{day:'numeric',month:'short'})}</span>`:
+      `<span class="date-chip" style="color:var(--light)">${DAYS_SHORT[new Date().getDay()]}</span>`;
+    const ords=v.orders||[];
+    const ordHtml=ords.length?`<div class="order-tags">`+ords.map(o=>{
+      if(o.id==='__other__') return`<div class="order-tag">⚠️</div>`;
+      return`<div class="order-tag"><span>${o.id}</span>${o.client?`<span class="tag-client">${o.client}</span>`:''}</div>`;
+    }).join('')+`</div>`:`<span style="font-size:10px;color:var(--light)">—</span>`;
+    return`<tr class="lrow${isDoneVisit(v)?' lrow-done':''}">
+      <td style="min-width:58px"><span class="time-chip">${v.time}</span>${datePart}</td>
+      <td><span class="tchip ${v.visitor}">${VIS_LBL[v.visitor]}</span></td>
+      <td><span class="ochip ${v.operation}">${OP_LBL[v.operation]}</span></td>
+      <td>${ordHtml}</td>
+      <td><span class="time-rec">${v.timeAuto||'—'}</span></td>
+      <td><button class="dbtn" onclick="delVisit(${visits.indexOf(v)})">×</button></td>
+    </tr>`;
+  };
+
+  let html='';
+  active.forEach(v=>{ html+=rowHtml(v); });
+  if(done.length){
+    html+=`<tr class="tg-hdr"><td colspan="6">✓ Выдано / Возвращено (${done.length})</td></tr>`;
+    done.forEach(v=>{ html+=rowHtml(v); });
+  }
+  tbody.innerHTML=html;
+
+  document.getElementById('subBtn').disabled=false; document.getElementById('subBtn2').disabled=false;
+  const hint2=`${visits.length} ${pl(visits.length,'визит','визита','визитов')} · готово к отправке`;
+  document.getElementById('subHint').textContent=hint2; document.getElementById('subHint2').textContent=hint2;
+}
+
+function delVisit(i){ visits.splice(i,1); visits.forEach((v,j)=>v.n=j+1); renderTable(); updateOrdersBar(); renderOrderCards(); populateOrders(); saveDraft(); }
+
+// ── ORDERS BAR ──
+function updateOrdersBar(){
+  const {issuedIds,returnedIds}=getSessionStatuses();
+  let p=0,is=0,re=0,ov=0;
+  orders.forEach(o=>{
+    if(issuedIds.has(o.id))      is++;
+    else if(returnedIds.has(o.id)) re++;
+    else if(o.overdue)             ov++;
+    else                           p++;
+  });
+  document.getElementById('bar-pending').textContent=p;
+  document.getElementById('bar-issued').textContent=is;
+  document.getElementById('bar-returned').textContent=re;
+  const ovEl=document.getElementById('bar-overdue');
+  if(ovEl) ovEl.textContent=ov;
+  const badge=document.getElementById('pendingBadge');
+  if(p+ov>0){badge.style.display='inline-block';badge.textContent=p+ov;badge.className='stab-badge';}
+  else if(is+re>0){badge.style.display='inline-block';badge.textContent='✓';badge.className='stab-badge grn';}
+  else{badge.style.display='none';}
+}
+
+// ── ORDER CARDS ──
+function renderOrderCards(){
+  const {issuedIds,returnedIds}=getSessionStatuses();
+  const display=orders.map(o=>{
+    let s=o.status||'pending';
+    if(issuedIds.has(o.id))    s='issued';
+    if(returnedIds.has(o.id))  s='returned';
+    return{...o,s};
+  });
+  const oc=display.filter(o=>o.overdue&&o.s==='pending').length;
+  const pc=display.filter(o=>!o.overdue&&o.s==='pending').length;
+  const ic=display.filter(o=>o.s==='issued').length;
+  const rc=display.filter(o=>o.s==='returned').length;
+  document.getElementById('ordersMini').innerHTML=[
+    ['Ожидают','var(--pending)',pc],['Выдано','var(--issued)',ic],['Возвращено','var(--ret)',rc]
+  ].map(([l,c,n])=>`<div class="osc" style="border-top:2px solid ${c}"><div class="osc-l">${l}</div><div class="osc-n">${n}</div></div>`).join('');
+
+  const overdueOrders   = display.filter(o=>o.overdue && o.s==='pending');
+  const pendingIssue    = display.filter(o=>o.type!=='return' && o.s==='pending' && !o.overdue);
+  const pendingReturn   = display.filter(o=>o.type==='return'  && o.s==='pending' && !o.overdue);
+  const done            = display.filter(o=>o.s==='issued'||o.s==='returned');
+
+  let html='';
+  if(overdueOrders.length){
+    html+=`<div class="sec-lbl" style="color:#E74C3C">🔴 Просрочены (${overdueOrders.length})</div>`;
+    html+=overdueOrders.map(o=>orderCard(o)).join('');
+  }
+  if(pendingIssue.length){
+    html+=`<div class="sec-lbl">📦 К выдаче</div>`;
+    html+=pendingIssue.map(o=>orderCard(o)).join('');
+  }
+  if(pendingReturn.length){
+    html+=`<div class="sec-lbl">🔄 К возврату</div>`;
+    html+=pendingReturn.map(o=>orderCard(o)).join('');
+  }
+  if(done.length){
+    html+=`<div class="sec-lbl" style="color:var(--issued)">✓ Выдано / Возвращено (${done.length})</div>`;
+    html+=done.map(o=>orderCard(o)).join('');
+  }
+  if(!orders.length) html=`<div style="text-align:center;padding:32px;color:var(--light)"><div style="font-size:26px;margin-bottom:7px">📭</div><div style="font-size:13px;font-weight:600">Нет заказов на сегодня</div></div>`;
+  document.getElementById('ordersCards').innerHTML=html;
+}
+
+function orderCard(o){
+  const isOverdue=o.overdue&&o.s==='pending';
+  const cls=o.s==='issued'?'issued':o.s==='returned'?'returned':isOverdue?'overdue':o.type==='return'?'return-due':'pending';
+  const txt=o.s==='issued'?'✓ Выдан':o.s==='returned'?'✓ Возвращён':isOverdue?'🔴 Просрочен':o.type==='return'?'🔄 К возврату':'⏳ Ожидает';
+  return`<div class="order-card ${cls}">
+    <div class="oc-top"><span class="oc-id">${o.id}</span><span class="oc-status ${cls}">${txt}</span></div>
+    <div class="oc-client">${o.client||'—'}</div>
+    <div class="oc-meta"><span>📅 возврат ${o.returnDate||'—'}</span><span>${o.delivery?.includes('Наш')?'🚛':'🚶'} ${o.delivery||'—'}</span></div>
+  </div>`;
+}
+
+// ── MODAL ──
+function openModal(){
+  if(!worker){ showToast('Сначала начните смену'); return; }
+  const c=visits.filter(v=>v.visitor==='client').length, y=visits.filter(v=>v.visitor==='yandex').length, o=visits.filter(v=>v.visitor==='our').length;
+  const allOrds=visits.flatMap(v=>(v.orders||[]).filter(ord=>ord.id&&ord.id!=='__other__'));
+  const times=visits.map(v=>v.time).sort();
+  document.getElementById('modalRows').innerHTML=`
+    <div class="mrow"><span>Кладовщик</span><b>${worker}</b></div>
+    <div class="mrow"><span>Смена</span><b>${isNight()?'Ночная':'Дневная'}</b></div>
+    <div class="mrow"><span>Время с – по</span><b>${times[0]||'—'} – ${times[times.length-1]||'—'} МСК</b></div>
+    <div class="mrow"><span>Визитов</span><b>${visits.length}</b></div>
+    <div class="mrow"><span>Заказов обработано</span><b>${allOrds.length}</b></div>
+    <div class="mrow"><span>Клиент / Яндекс / Наш</span><b>${c} / ${y} / ${o}</b></div>`;
+  document.getElementById('ovl').classList.add('show');
+}
+function closeModal(e){ if(!e||e.target===document.getElementById('ovl')) document.getElementById('ovl').classList.remove('show'); }
+
+// ── SUBMIT ──
+async function confirmSubmit(){
+  document.getElementById('ovl').classList.remove('show');
+  stopAutosave();
+  stopOrdersRefresh();
+  const payload={
+    shiftDate:new Date().toLocaleDateString('ru',{timeZone:'Europe/Moscow'}),
+    shiftStart:shiftStart?shiftStart.toISOString():new Date().toISOString(),
+    shiftEnd:new Date().toISOString(),
+    worker, isNight:isNight()?'Ночь':'День',
+    totalEntries:visits.length, isDraft:false,
+    entries:visits.map(v=>({
+      visitor:v.visitor, operation:v.operation,
+      orders:v.orders||[], orderId:v.orderId||'', orderClient:v.orderClient||'',
+      orderReturnDate:v.orderReturnDate||'', orderDelivery:v.orderDelivery||'',
+      comment:v.comment||'', date:v.date||'', time:v.time, timeAuto:v.timeAuto,
+      timestamp:v.ts, night:v.night?'Ночь':'День'
+    }))
+  };
+  const s=JSON.parse(localStorage.getItem('wh_shifts')||'[]'); s.push(payload); localStorage.setItem('wh_shifts',JSON.stringify(s));
+  localStorage.removeItem(DRAFT_KEY);
+  if(!SCRIPT_URL.includes('YOUR_')){
+    try{await fetch(SCRIPT_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})}catch(e){}
+  }
+  showSuccess(payload);
+}
+
+function showSuccess(p){
+  const c=p.entries.filter(e=>e.visitor==='client').length, y=p.entries.filter(e=>e.visitor==='yandex').length, o=p.entries.filter(e=>e.visitor==='our').length;
+  const allOrds=p.entries.flatMap(e=>(e.orders||[]).filter(ord=>ord.id&&ord.id!=='__other__'));
+  const times=p.entries.map(e=>e.time).sort();
+  document.getElementById('sucSub').textContent=`${p.worker} · ${p.shiftDate}`;
+  document.getElementById('sucSum').innerHTML=`
+    <div class="sr"><span class="sr-l">Кладовщик</span><span class="sr-v">${p.worker}</span></div>
+    <div class="sr"><span class="sr-l">Время суток</span><span class="sr-v">${p.isNight}</span></div>
+    <div class="sr"><span class="sr-l">Визиты с – по (МСК)</span><span class="sr-v">${times[0]||'—'} – ${times[times.length-1]||'—'}</span></div>
+    <div class="sr"><span class="sr-l">Визитов</span><span class="sr-v">${p.totalEntries}</span></div>
+    <div class="sr"><span class="sr-l">Заказов обработано</span><span class="sr-v">${allOrds.length}</span></div>
+    <div class="sr"><span class="sr-l">Клиент / Яндекс / Наш</span><span class="sr-v">${c} / ${y} / ${o}</span></div>`;
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.getElementById('s-success').classList.add('active');
+  window.scrollTo(0,0);
+}
+
+function resetAll(){ visits=[];worker=null;visitor=null;operation=null;shiftStart=null;pendingOrders=[];hasOther=false;
+  stopAutosave(); stopOrdersRefresh();
+  document.querySelectorAll('.wbtn').forEach(b=>b.classList.remove('sel'));
+  document.getElementById('startBtn').disabled=true;
+  renderTable(); updateOrdersBar(); loadData(); showScreen('s-worker'); }
+
+function showScreen(id){ document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active')); document.getElementById('s-success').classList.remove('active'); document.getElementById(id).classList.add('active'); window.scrollTo(0,0); }
+function goBack(){
+  if(visits.length>0&&!confirm('Сменить кладовщика? Смена сохранена как черновик.')) return;
+  stopAutosave(); worker=null;
+  document.querySelectorAll('.wbtn').forEach(b=>b.classList.remove('sel'));
+  document.getElementById('startBtn').disabled=true;
+  showScreen('s-worker');
+}
+function pl(n,one,few,many){ if(n%10===1&&n%100!==11)return one; if([2,3,4].includes(n%10)&&![12,13,14].includes(n%100))return few; return many; }
+
+init();
+</script>
+</body>
+</html>
