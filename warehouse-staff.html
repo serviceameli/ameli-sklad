@@ -282,7 +282,7 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
 .vbtn.act.o{background:var(--our)}
 /* ── TIME+COMMENT ── */
 .tc2-row{display:flex;flex-direction:column;gap:6px;margin-top:7px}
-.tc2-time-row{display:flex;align-items:center;gap:10px}
+.tc2-time-row{display:flex;align-items:center;gap:8px;position:relative;flex-wrap:wrap}
 .tc2-time-row .flbl{margin:0;white-space:nowrap;flex-shrink:0}
 .tc2-time-row .time-inp{width:100px;flex-shrink:0}
 /* ── COMPACT DATE ── */
@@ -505,11 +505,10 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
       </div>
 
       <div style="margin-bottom:6px">
-        <label class="flbl">Заказы в визите <span style="font-weight:500;letter-spacing:0;text-transform:none;color:var(--muted)">(нажмите чтобы добавить)</span></label>
+        <label class="flbl">Заказы в визите <span style="font-weight:500;letter-spacing:0;text-transform:none;color:var(--muted)">(выберите ниже)</span></label>
         <div class="added-orders-list" id="addedOrdersList">
           <span class="ao-empty">Заказы не выбраны</span>
         </div>
-        <div class="order-tap-list" id="orderTapList"></div>
         <select id="orderSel" style="display:none" onchange="onOrderChange()">
           <option value="">— выберите заказ —</option>
         </select>
@@ -524,21 +523,20 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
         <div class="tc2-time-row">
           <label class="flbl">Время (МСК)</label>
           <input class="time-inp" id="timeInp" type="time">
+          <span class="date-compact-lbl" id="dateLbl" onclick="toggleDatePicker()" style="margin-left:6px">📅 <span id="dateLblText">—</span> ✏️</span>
+          <div class="date-compact-picker" id="datePicker" style="display:none;position:absolute;z-index:10;background:var(--card);border:1px solid var(--rule);border-radius:9px;padding:6px;margin-top:2px">
+            <select class="date-sel" id="dateInp" onchange="onDateChange()"></select>
+          </div>
         </div>
         <div class="field-g">
           <label class="flbl">Комментарий</label>
           <input type="text" class="comment-inp" id="commentInp" placeholder="необязательно...">
         </div>
       </div>
-      <div class="date-compact-row">
-        <span class="date-compact-lbl" id="dateLbl" onclick="toggleDatePicker()">
-          📅 <span id="dateLblText">—</span> ✏️
-        </span>
-        <div class="date-compact-picker" id="datePicker" style="display:none">
-          <select class="date-sel" id="dateInp" onchange="onDateChange()"></select>
-        </div>
-      </div>
+
       <button class="add-btn" id="addBtn" onclick="addVisit()" disabled>＋ Добавить визит</button>
+
+      <div class="order-tap-list" id="orderTapList" style="margin-top:10px"></div>
     </div>
   </div>
 
