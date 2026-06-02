@@ -1487,11 +1487,14 @@ function delVisit(i){
   const msg = `Удалить визит?\n${ordersText}`;
   if(!confirm(msg)) return;
 
-  // Немедленно убираем ID из серверных наборов — чтобы не мигало после refresh
+  // Немедленно убираем из серверных наборов — чтобы не мигало после refresh
   realOrders.forEach(o=>{
     serverIssuedToday.delete(o.id);
     serverReturnedToday.delete(o.id);
   });
+  if(hasOtherFlag){
+    serverOtherVisits = serverOtherVisits.filter(v=>v.time !== visit.time);
+  }
 
   // Отправляем удаление на сервер (fire-and-forget)
   if(!SCRIPT_URL.includes('YOUR_') && shiftStart){
