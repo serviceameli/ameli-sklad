@@ -1469,7 +1469,46 @@ function renderTable(){
   if(vb){ vb.textContent=visits.length; vb.style.display=visits.length?'inline-block':'none'; }
 }
 
-function delVisit(i){ visits.splice(i,1); visits.forEach((v,j)=>v.n=j+1); renderTable(); updateOrdersBar(); renderOrderCards(); populateOrders(); saveDraft(); }
+function delVisit(i){
+  const visit = visits[i];
+  if(!visit) return;
+
+  // Строим текст подтверждения
+  const realOrders = (visit.orders||[]).filter(o=>o.id&&o.id!=='__other__');
+  const hasOtherFlag = (visit.orders||[]).some(o=>o.id==='__other__');
+  let ordersText = '';
+  if(realOrders.length){
+    const isReturn = ['return','dropoff','both'].includes(visit.operation);
+    const action = isReturn ? 'возврат' : 'выдачу';
+    ordersText = `Заказ${realOrders.length>1?'ы':''} ${realOrders.map(o=>o.id).join(', ')} вернётся на ${action}.`;
+  } else if(hasOtherFlag){
+    ordersText = 'Визит «не из списка» будет удалён.';
+  }
+  const msg = `Удалить визит?\n${ordersText}`;
+  if(!confirm(msg)) return;
+
+  // Немедленно убираем ID из серверных наборов — чтобы не мигало после refresh
+  realOrders.forEach(o=>{
+    serverIssuedToday.delete(o.id);
+    serverReturnedToday.delete(o.id);
+  });
+
+  // Отправляем удаление на сервер (fire-and-forget)
+  if(!SCRIPT_URL.includes('YOUR_') && shiftStart){
+    fetch(SCRIPT_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        action:'deleteVisit',
+        shiftStart: shiftStart.toISOString(),
+        worker,
+        timeAuto: visit.timeAuto||''
+      })
+    }).catch(()=>{});
+  }
+
+  visits.splice(i,1);
+  visits.forEach((v,j)=>v.n=j+1);
+  renderTable(); updateOrdersBar(); renderOrderCards(); populateOrders(); saveDraft();
+}
 
 // ── ORDERS BAR ──
 // Объединяет «не из списка» визиты из сессии + сервера (без дублей по time)

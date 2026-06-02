@@ -156,6 +156,12 @@ function doPost(e) {
       return jsonResponse({ success: true, type: 'visit' });
     }
 
+    // Удаление одного визита по shiftStart + worker + timeAuto
+    if (data.action === 'deleteVisit') {
+      deleteVisitRow(log, data.shiftStart, data.worker, data.timeAuto);
+      return jsonResponse({ success: true, type: 'deleteVisit' });
+    }
+
     // Закрытие смены: удалить ранее записанные строки этой смены, записать заново
     deleteShiftRows(log, data.shiftStart, data.worker);
 
@@ -223,6 +229,23 @@ function writeEntryToLog(log, data, entry) {
       ]);
     }
   });
+}
+
+// Удаляет одну строку визита по shiftStart + worker + timeAuto (col 15, 0-based).
+function deleteVisitRow(log, shiftStart, worker, timeAuto) {
+  if (log.getLastRow() < 2) return;
+  const vals = log.getRange(2, 1, log.getLastRow()-1, 16).getValues();
+  for (let i = vals.length-1; i >= 0; i--) {
+    const storedStart = vals[i][1] instanceof Date
+      ? vals[i][1].toISOString()
+      : vals[i][1].toString();
+    const storedWorker   = vals[i][3].toString().trim();
+    const storedTimeAuto = vals[i][15] ? vals[i][15].toString().trim() : '';
+    if (storedStart === shiftStart && storedWorker === worker && storedTimeAuto === timeAuto) {
+      log.deleteRow(i+2);
+      return; // удаляем только первое совпадение
+    }
+  }
 }
 
 // Удаляет все строки лога принадлежащие данной смене (по shiftStart + worker).
