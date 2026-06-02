@@ -614,6 +614,7 @@ const OP_LBL  = {issue:'Выдача',return:'Возврат',pickup:'Выдач
 let workers=[], orders=[], visits=[];
 let worker=null, visitor=null, operation=null, shiftStart=null;
 let viewOnlyMode=false;
+let personalWorkerUrl=null; // имя из ?worker= параметра, null если общая ссылка
 let pendingOrders=[];
 let autosaveTimer=null, formOpen=true, currentShiftTab='add';
 let hasOther=false;
@@ -642,6 +643,7 @@ async function init(){
   if(urlWorker){
     const found = workers.find(w=>w.name.trim()===urlWorker.trim());
     if(found){
+      personalWorkerUrl = found.name;
       worker = found.name;
       // Ищем черновик: сначала localStorage, затем с сервера
       const draftRaw = localStorage.getItem(draftKey())
@@ -653,10 +655,8 @@ async function init(){
           if(d.visits){
             const hoursSince = (Date.now() - new Date(d.savedAt)) / 3600000;
             if(hoursSince < 12){
-              // Свежая смена → сразу в работу
               restoreShiftDirect(d);
             } else {
-              // Старая смена → спрашиваем
               showOldShiftScreen(d);
             }
             return;
@@ -667,13 +667,10 @@ async function init(){
       showWelcomeScreen(found);
       return;
     }
-    // Имя не найдено → общий выбор
-    showScreen('s-worker');
-    return;
   }
 
-  // Обычный вход — выбор кладовщика
-  showScreen('s-worker');
+  // Нет личной ссылки (или имя не найдено) → режим просмотра
+  enterViewOnly();
 }
 
 // ── WELCOME ──
@@ -693,8 +690,15 @@ function welcomeStartShift(){
 
 function enterViewOnly(){
   viewOnlyMode=true;
-  document.getElementById('voBanner').style.display='flex';
-  // Скрываем табы «＋ Визит» и «📋 Смена» — в просмотре они не нужны
+  // Текст баннера зависит от типа ссылки
+  const banner=document.getElementById('voBanner');
+  if(personalWorkerUrl){
+    banner.innerHTML=`<span class="vo-banner-txt">👀 Только просмотр — добавление визитов недоступно</span>
+      <button class="vo-start-btn" onclick="startShiftFromViewOnly()">Начать смену →</button>`;
+  } else {
+    banner.innerHTML=`<span class="vo-banner-txt">👀 Только просмотр — для работы откройте личную ссылку</span>`;
+  }
+  banner.style.display='flex';
   document.getElementById('stab-add').style.display='none';
   document.getElementById('stab-shift').style.display='none';
   document.getElementById('shiftWho').innerHTML=(worker||'Склад')+`<span>· просмотр</span>`;
@@ -1625,21 +1629,34 @@ function showSuccess(p){
   window.scrollTo(0,0);
 }
 
-function resetAll(){ visits=[];worker=null;visitor=null;operation=null;shiftStart=null;pendingOrders=[];hasOther=false;
+function resetAll(){
+  visits=[]; visitor=null; operation=null; shiftStart=null; pendingOrders=[]; hasOther=false;
   exitViewOnly();
   stopAutosave(); stopOrdersRefresh();
-  document.querySelectorAll('.wbtn').forEach(b=>b.classList.remove('sel'));
-  document.getElementById('startBtn').disabled=true;
   const vb=document.getElementById('visitsBadge'); if(vb) vb.style.display='none';
-  renderTable(); updateOrdersBar(); loadData(); showScreen('s-worker'); }
+  renderTable(); updateOrdersBar();
+  if(personalWorkerUrl){
+    // Личная ссылка — возвращаем на welcome-экран этого кладовщика
+    worker = personalWorkerUrl;
+    const found = workers.find(w=>w.name===personalWorkerUrl);
+    if(found){ showWelcomeScreen(found); return; }
+  }
+  // Общая ссылка — режим просмотра
+  worker = null;
+  loadData().then(()=>{ populateOrders(); updateOrdersBar(); renderOrderCards(); });
+  enterViewOnly();
+}
 
 function showScreen(id){ document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active')); document.getElementById('s-success').classList.remove('active'); document.getElementById(id).classList.add('active'); window.scrollTo(0,0); }
 function goBack(){
-  if(visits.length>0&&!confirm('Сменить кладовщика? Смена сохранена как черновик.')) return;
-  stopAutosave(); worker=null;
-  document.querySelectorAll('.wbtn').forEach(b=>b.classList.remove('sel'));
-  document.getElementById('startBtn').disabled=true;
-  showScreen('s-worker');
+  if(visits.length>0&&!confirm('Выйти из смены? Смена сохранена как черновик.')) return;
+  stopAutosave();
+  if(personalWorkerUrl){
+    worker = personalWorkerUrl;
+    const found = workers.find(w=>w.name===personalWorkerUrl);
+    if(found){ showWelcomeScreen(found); return; }
+  }
+  worker=null; enterViewOnly();
 }
 function pl(n,one,few,many){ if(n%10===1&&n%100!==11)return one; if([2,3,4].includes(n%10)&&![12,13,14].includes(n%100))return few; return many; }
 
