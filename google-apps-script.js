@@ -91,7 +91,7 @@ function getProcessedOrderIds() {
       otherVisits.push({
         visitor:   visitorKey[r[6] ? r[6].toString().trim() : ''] || 'client',
         operation: operationKey[operation] || 'issue',
-        time:      r[14] ? r[14].toString().trim() : '',
+        time:      r[14] ? (r[14] instanceof Date ? Utilities.formatDate(r[14], 'Europe/Moscow', 'HH:mm') : r[14].toString().trim()) : '',
         comment:   r[17] ? r[17].toString().trim() : '',
         worker:    workerName
       });
