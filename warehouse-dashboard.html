@@ -532,12 +532,20 @@ function switchTab(t){
 // ══════════════════════════════════════════
 // ORDERS TODAY
 // ══════════════════════════════════════════
+// shiftDate может прийти как "02.06.2026" или как ISO-строка из Sheets Date объекта
+function shiftDateToISO(sd){
+  if(!sd) return '';
+  const s = sd.toString();
+  if(/^\d{2}\.\d{2}\.\d{4}/.test(s)){ const [d,m,y]=s.split('.'); return `${y}-${m}-${d}`; }
+  return s.split('T')[0];
+}
+
 function getOrderStatuses(){
   const todayStr = todayMsk();
   const issued=new Set(), returned=new Set();
   allVisits.forEach(v=>{
-    if(!v.ts) return;
-    const d = v.ts.split('T')[0];
+    // Используем shiftDate (МСК) — UTC-дата ts ненадёжна для ночных смен
+    const d = shiftDateToISO(v.shiftDate) || (v.ts||'').split('T')[0];
     if(d!==todayStr) return;
     v.ordersArr.forEach(o=>{
       if(!o.id||o.id==='__other__') return;
@@ -550,8 +558,17 @@ function getOrderStatuses(){
 
 function renderOrders(){
   const {issued,returned} = getOrderStatuses();
-  const toIssue  = todayOrders.filter(o=>o.type==='issue');
-  const toReturn = todayOrders.filter(o=>o.type==='return');
+
+  // sameDay-заказ: до выдачи → в К выдаче; после выдачи → в К возврату; после возврата → готово
+  const effectiveType = o => {
+    if(!o.sameDay) return o.type;
+    if(returned.has(o.id)) return 'done';
+    if(issued.has(o.id))   return 'return';
+    return 'issue';
+  };
+
+  const toIssue  = todayOrders.filter(o=>{ const t=effectiveType(o); return t==='issue'; });
+  const toReturn = todayOrders.filter(o=>{ const t=effectiveType(o); return t==='return'; });
 
   const statusOf = o => {
     if(issued.has(o.id))   return 'issued';
@@ -572,7 +589,7 @@ function renderOrders(){
   // Карта orderId → comment из allVisits (сегодняшние визиты)
   const todayStr = todayMsk();
   const commentMap = {};
-  allVisits.filter(v=>(v.ts||'').startsWith(todayStr)).forEach(v=>{
+  allVisits.filter(v=>shiftDateToISO(v.shiftDate)===(todayStr)||((v.ts||'').startsWith(todayStr))).forEach(v=>{
     if(!v.comment) return;
     (v.ordersArr||[]).forEach(o=>{ if(o.id&&o.id!=='__other__') commentMap[o.id]=v.comment; });
   });
