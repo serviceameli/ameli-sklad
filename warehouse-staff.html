@@ -621,6 +621,7 @@ let serverIssuedToday   = new Set();
 let serverReturnedToday = new Set();
 let serverIssuedBy   = {};  // orderId → workerName
 let serverReturnedBy = {};
+let serverOtherVisits = [];  // визиты «не из списка» из лога
 
 // Ключ localStorage зависит от кладовщика — чтобы у каждого своё хранилище
 function draftKey(){ return worker ? 'wh_draft_'+worker.replace(/\s+/g,'_') : 'wh_draft'; }
@@ -816,6 +817,7 @@ async function loadData(workerParam){
     serverReturnedToday = new Set(j.processedOrders?.returned || []);
     serverIssuedBy   = j.processedOrders?.issuedBy   || {};
     serverReturnedBy = j.processedOrders?.returnedBy || {};
+    serverOtherVisits = j.processedOrders?.otherVisits || [];
     return j.draft || null; // черновик этого кладовщика с сервера
   }catch(e){
     workers=[]; // имена берутся только из Google Sheets
@@ -1148,6 +1150,7 @@ async function refreshOrdersFromServer(){
       orders=j.orders;
       serverIssuedToday   = new Set(j.processedOrders?.issued   || []);
       serverReturnedToday = new Set(j.processedOrders?.returned || []);
+      serverOtherVisits = j.processedOrders?.otherVisits || [];
       populateOrders();
       updateOrdersBar();
       renderOrderCards();
@@ -1539,8 +1542,12 @@ function renderOrderCards(){
     html+=sameDayLocked.map(o=>orderCard(o,'locked')).join('');
     html+=pendingReturn.map(o=>orderCard(o)).join('');
   }
-  // Визиты «нет в списке» из текущей сессии — добавляем в секцию «Выдано/Возвращено»
-  const otherVisits = visits.filter(v=>(v.orders||[]).some(o=>o.id==='__other__'));
+  // Визиты «не из списка»: из текущей сессии + с сервера (для режима просмотра)
+  const sessionOtherVisits = visits.filter(v=>(v.orders||[]).some(o=>o.id==='__other__'));
+  // Дедуплицируем: serverOtherVisits — только те, которых нет в текущей сессии (по time)
+  const sessionOtherTimes = new Set(sessionOtherVisits.map(v=>v.time));
+  const extraOtherVisits = serverOtherVisits.filter(v=>!sessionOtherTimes.has(v.time));
+  const otherVisits = [...sessionOtherVisits, ...extraOtherVisits];
   const otherCards = otherVisits.map(v=>otherVisitCard(v)).join('');
   const doneTotal = done.length + sameDayIssued.length + otherVisits.length;
 

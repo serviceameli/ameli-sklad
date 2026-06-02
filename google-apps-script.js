@@ -63,23 +63,40 @@ function getWorkerDraft(workerName) {
 function getProcessedOrderIds() {
   const ss  = SpreadsheetApp.getActiveSpreadsheet();
   const log = ss.getSheetByName(SHEET_LOG);
-  if (!log || log.getLastRow() < 2) return { issued: [], returned: [], issuedBy: {}, returnedBy: {} };
+  if (!log || log.getLastRow() < 2) return { issued: [], returned: [], issuedBy: {}, returnedBy: {}, otherVisits: [] };
 
-  const rows = log.getRange(2, 1, log.getLastRow()-1, 9).getValues();
+  const rows = log.getRange(2, 1, log.getLastRow()-1, 18).getValues();
 
   const issued     = new Set();
   const returned   = new Set();
   const issuedBy   = {};  // orderId → workerName
   const returnedBy = {};
+  const otherVisits = [];
+
+  const visitorKey = {'Клиент':'client','Курьер Яндекс':'yandex','Наш курьер':'our'};
+  const operationKey = {'Выдача':'issue','Выдача (наш)':'issue','Получение (наш)':'issue','Возврат':'return','Возврат (наш)':'return','Выдача и возврат':'both','Выдача+Возврат (наш)':'both','Получение+Возврат':'both'};
 
   rows.forEach(r => {
     const workerName   = r[3] ? r[3].toString().trim() : '';
     const operation    = r[7] ? r[7].toString().trim() : '';
     const allOrdersStr = r[8] ? r[8].toString().trim() : '';
+    const firstOrder   = r[10] ? r[10].toString().trim() : '';
     const orderIds = allOrdersStr
       .split(',')
       .map(s => s.trim())
       .filter(s => s && s !== '(нет в списке)');
+
+    // «Не из списка» визит: нет реальных заказов, первый заказ = '(нет в списке)'
+    if (!orderIds.length && firstOrder === '(нет в списке)') {
+      otherVisits.push({
+        visitor:   visitorKey[r[6] ? r[6].toString().trim() : ''] || 'client',
+        operation: operationKey[operation] || 'issue',
+        time:      r[14] ? r[14].toString().trim() : '',
+        comment:   r[17] ? r[17].toString().trim() : '',
+        worker:    workerName
+      });
+      return;
+    }
 
     if (!orderIds.length) return;
 
@@ -92,7 +109,7 @@ function getProcessedOrderIds() {
     });
   });
 
-  return { issued: [...issued], returned: [...returned], issuedBy, returnedBy };
+  return { issued: [...issued], returned: [...returned], issuedBy, returnedBy, otherVisits };
 }
 
 // Отладка — запустите вручную если processedToday пустой
