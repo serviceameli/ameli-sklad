@@ -1060,7 +1060,7 @@ function populateOrders(){
     html+=sameDayPending.map(o=>tapRow(o,'ret',true)).join('');
     html+=toReturn.map(o=>tapRow(o,'ret',false,'return')).join('');
   }
-  html+=`<div class="otap otap-other" onclick="tapOrder('__other__')">
+  html+=`<div class="otap otap-other" id="otap-__other__" onclick="tapOrder('__other__')">
     <div class="otap-left"><div class="otap-id">⚠️ Нет в списке</div></div>
     <div class="otap-check" id="otap-chk-__other__"></div>
   </div>`;
