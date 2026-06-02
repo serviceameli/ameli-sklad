@@ -691,6 +691,10 @@ function welcomeViewOnly(){
 function mskNow(){ return new Date(Date.now()+MSK_OFFSET*3600000); }
 function mskHour(){ return mskNow().getUTCHours(); }
 function isNight(){ const h=mskHour(); return h>=NIGHT_START||h<NIGHT_END; }
+// Определяет день/ночь по конкретному моменту (например, начало смены)
+function isNightAt(date){ const h=(date.getUTCHours()+MSK_OFFSET)%24; return h>=NIGHT_START||h<NIGHT_END; }
+// Возвращает ЧЧ:ММ МСК для любого Date объекта
+function toMskTime(date){ return pad((date.getUTCHours()+MSK_OFFSET)%24)+':'+pad(date.getUTCMinutes()); }
 function nowTime(){ const n=mskNow(); return pad(n.getUTCHours())+':'+pad(n.getUTCMinutes()); }
 function pad(n){ return String(n).padStart(2,'0'); }
 function todayMsk(){ return mskNow().toISOString().split('T')[0]; }
@@ -968,7 +972,7 @@ function updateShiftInfoCard(){
   const sub=document.getElementById('shiftInfoSub');
   if(!el) return;
   el.textContent=worker+(shiftStart?` · с ${pad(new Date(shiftStart.getTime()+3*3600000).getUTCHours())+':'+pad(new Date(shiftStart.getTime()+3*3600000).getUTCMinutes())} МСК`:'');
-  if(sub) sub.textContent=isNight()?'🌙 Ночная смена':'☀️ Дневная смена';
+  if(sub) sub.textContent=(shiftStart?isNightAt(shiftStart):isNight())?'🌙 Ночная смена':'☀️ Дневная смена';
 }
 
 // ── SHIFT TABS ──
@@ -1515,10 +1519,12 @@ function openModal(){
   const c=visits.filter(v=>v.visitor==='client').length, y=visits.filter(v=>v.visitor==='yandex').length, o=visits.filter(v=>v.visitor==='our').length;
   const allOrds=visits.flatMap(v=>(v.orders||[]).filter(ord=>ord.id&&ord.id!=='__other__'));
   const times=visits.map(v=>v.time).sort();
+  const shiftStartMsk = shiftStart ? toMskTime(shiftStart) : '—';
+  const shiftNight = shiftStart ? isNightAt(shiftStart) : isNight();
   document.getElementById('modalRows').innerHTML=`
     <div class="mrow"><span>Кладовщик</span><b>${worker}</b></div>
-    <div class="mrow"><span>Смена</span><b>${isNight()?'Ночная':'Дневная'}</b></div>
-    <div class="mrow"><span>Время с – по</span><b>${times[0]||'—'} – ${times[times.length-1]||'—'} МСК</b></div>
+    <div class="mrow"><span>Смена</span><b>${shiftNight?'Ночная':'Дневная'}</b></div>
+    <div class="mrow"><span>Время с – по</span><b>${shiftStartMsk} – ${nowTime()} МСК</b></div>
     <div class="mrow"><span>Визитов</span><b>${visits.length}</b></div>
     <div class="mrow"><span>Заказов обработано</span><b>${allOrds.length}</b></div>
     <div class="mrow"><span>Клиент / Яндекс / Наш</span><b>${c} / ${y} / ${o}</b></div>`;
@@ -1537,7 +1543,7 @@ async function confirmSubmit(){
     shiftDate:mskDateClose,
     shiftStart:shiftStart?shiftStart.toISOString():new Date().toISOString(),
     shiftEnd:new Date().toISOString(),
-    worker, isNight:isNight()?'Ночь':'День',
+    worker, isNight:(shiftStart?isNightAt(shiftStart):isNight())?'Ночь':'День',
     totalEntries:visits.length, isDraft:false,
     entries:visits.map(v=>({
       visitor:v.visitor, operation:v.operation,
