@@ -433,7 +433,7 @@ const DAYS   = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
 const VIS    = {client:'Клиент',yandex:'Яндекс',our:'Наш курьер'};
 const OPL    = {issue:'Выдача',return:'Возврат',pickup:'Получение',dropoff:'Возврат',both:'Получ.+Возврат'};
 
-let allShifts=[], allVisits=[], todayOrders=[], serverProcessed={issued:[],returned:[]};
+let allShifts=[], allVisits=[], todayOrders=[], serverProcessed={issued:[],returned:[],otherVisits:[]};
 let statsPeriod=30, wPeriod=30, tsPeriod=30, logPeriod=7, hPeriod=30;
 let charts={};
 
@@ -472,7 +472,7 @@ async function loadData(){
       const j=await r.json();
       allShifts  = j.shifts||local;
       todayOrders= j.orders||[];
-      if(j.processedOrders) serverProcessed={issued:j.processedOrders.issued||[],returned:j.processedOrders.returned||[]};
+      if(j.processedOrders) serverProcessed={issued:j.processedOrders.issued||[],returned:j.processedOrders.returned||[],otherVisits:j.processedOrders.otherVisits||[]};
     }catch(e){ allShifts=local; todayOrders=[]; }
   }
 
@@ -570,15 +570,23 @@ function renderOrders(){
     return 'pending';
   };
 
+  // «Нет в списке» визиты — сегодняшние из otherVisits
+  const todayStr2 = todayMsk();
+  const otherToday = serverProcessed.otherVisits; // уже за всё время, но для счётчика используем все
+  const otherIssued   = otherToday.filter(v=>['issue','pickup','both'].includes(v.operation));
+  const otherReturned = otherToday.filter(v=>['return','dropoff','both'].includes(v.operation));
+
   // Summary
   let pI=0,iI=0,pR=0,rR=0;
   toIssue.forEach(o=>{ const s=statusOf(o); if(s==='issued')iI++; else pI++; });
   toReturn.forEach(o=>{ const s=statusOf(o); if(s==='returned')rR++; else pR++; });
+  const totalIssued   = iI + otherIssued.length;
+  const totalReturned = rR + otherReturned.length;
   document.getElementById('ordersSummary').innerHTML=`
     <div class="sc acc"><div class="sc-lbl">К выдаче — ожидают</div><div class="sc-n">${pI}</div><div class="sc-s">из ${toIssue.length}</div></div>
-    <div class="sc gr"><div class="sc-lbl">Выдано сегодня</div><div class="sc-n">${iI}</div><div class="sc-s">✓</div></div>
+    <div class="sc gr"><div class="sc-lbl">Выдано сегодня</div><div class="sc-n">${totalIssued}</div><div class="sc-s">✓</div></div>
     <div class="sc bl"><div class="sc-lbl">К возврату — ожидают</div><div class="sc-n">${pR}</div><div class="sc-s">из ${toReturn.length}</div></div>
-    <div class="sc gr"><div class="sc-lbl">Возвращено сегодня</div><div class="sc-n">${rR}</div><div class="sc-s">✓</div></div>`;
+    <div class="sc gr"><div class="sc-lbl">Возвращено сегодня</div><div class="sc-n">${totalReturned}</div><div class="sc-s">✓</div></div>`;
 
   // Карта orderId → comment из allVisits (сегодняшние визиты)
   const todayStr = todayMsk();
@@ -633,10 +641,38 @@ function renderOrders(){
     return html;
   };
 
+  // Строки «нет в списке» для таблицы
+  const deliveryMap = {client:'🚶 Самовывоз', yandex:'🚕 Яндекс', our:'🚛 Наша доставка'};
+  const otherRowHtml = v => {
+    const isRet = ['return','dropoff','both'].includes(v.operation);
+    const badge = isRet
+      ? `<span class="badge returned">✓ Возвращён</span>`
+      : `<span class="badge issued">✓ Выдан</span>`;
+    const deliv = deliveryMap[v.visitor] || v.visitor || '—';
+    const commentHtml = v.comment ? `<br><span style="font-size:10px;color:var(--muted);font-style:italic">💬 ${v.comment}</span>` : '';
+    return `<tr>
+      <td>${badge}</td>
+      <td><span style="font-size:10px;font-weight:600;color:#c08000;background:rgba(240,180,0,.12);padding:2px 6px;border-radius:4px">⚠️ нет в списке</span></td>
+      <td><span style="color:var(--muted)">— · ${v.time||'—'}</span>${commentHtml}</td>
+      <td></td>
+      <td><span style="font-size:12px">${deliv}</span></td>
+      <td>${v.worker?`<span style="font-size:11px;font-weight:600;color:var(--mid)">${v.worker}</span>`:'—'}</td>
+    </tr>`;
+  };
+
+  const otherSection = otherToday.length ? `
+    <div class="orders-section-lbl">⚠️ Не из списка (${otherToday.length})</div>
+    <table class="dt"><thead><tr>
+      <th>Статус</th><th>Заказ</th><th>Клиент / время</th><th>Даты</th><th>Доставка</th><th>Работник</th>
+    </tr></thead><tbody>
+    ${otherToday.map(otherRowHtml).join('')}
+    </tbody></table>` : '';
+
   document.getElementById('ordersContent').innerHTML =
     `<div class="twrap scroll">` +
     buildSection(toIssue,'issue','📦 К выдаче сегодня') +
     buildSection(toReturn,'return','🔄 К возврату сегодня') +
+    otherSection +
     `</div>`;
 }
 
