@@ -174,10 +174,10 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
 .date-sel{border:2px solid var(--rule);border-radius:9px;background:var(--bg);padding:6px 7px;font-family:'Montserrat',sans-serif;font-size:11px;font-weight:600;color:var(--black);appearance:none;-webkit-appearance:none;width:100%;text-align:center}
 .date-sel:focus{outline:none;border-color:var(--accent)}
 .date-sel.mod{border-color:#FF6B35;background:rgba(255,107,53,.06)}
-.time-inp{border:2px solid var(--accent);border-radius:9px;background:rgba(245,197,24,.06);padding:0 7px;font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:var(--black);width:100%;text-align:center;height:34px;box-sizing:border-box}
+.time-inp{border:2px solid var(--accent);border-radius:9px;background:rgba(245,197,24,.06);padding:6px 7px;font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:var(--black);width:100%;text-align:center;box-sizing:border-box}
 .time-inp:focus{outline:none;border-color:var(--black);background:var(--card)}
 .inp-hint{font-size:9px;color:var(--muted);font-weight:500;margin-top:2px;text-align:center}
-.comment-inp{border:2px solid var(--rule);border-radius:9px;background:var(--bg);padding:6px 9px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:500;color:var(--black);resize:none;width:100%;height:34px;box-sizing:border-box}
+.comment-inp{border:2px solid var(--rule);border-radius:9px;background:var(--bg);padding:6px 9px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:500;color:var(--black);width:100%;box-sizing:border-box}
 .comment-inp:focus{outline:none;border-color:var(--accent)}
 .add-btn{width:100%;height:41px;border-radius:11px;border:none;background:var(--accent);color:var(--black);font-size:13px;cursor:pointer;font-weight:700;font-family:'Montserrat',sans-serif;margin-top:7px}
 .add-btn:active{transform:scale(.98)}
@@ -281,8 +281,10 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
 .vbtn.act.y{background:var(--yandex)}
 .vbtn.act.o{background:var(--our)}
 /* ── TIME+COMMENT ROW ── */
-.tc2-row{display:flex;gap:8px;align-items:flex-start;margin-top:7px}
+.tc2-row{display:flex;gap:8px;align-items:flex-end;margin-top:7px}
+.tc2-row .field-g{display:flex;flex-direction:column}
 .tc2-row .field-g:first-child{flex:0 0 88px}
+.tc2-row .field-g input{flex:1}
 /* ── COMPACT DATE ── */
 .date-compact-row{margin-top:5px;margin-bottom:2px}
 .date-compact-lbl{font-size:11px;color:var(--muted);font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:4px;padding:3px 0;user-select:none}
@@ -525,7 +527,7 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
         </div>
         <div class="field-g" style="flex:1">
           <label class="flbl">Комментарий</label>
-          <textarea class="comment-inp" id="commentInp" placeholder="необязательно..."></textarea>
+          <input type="text" class="comment-inp" id="commentInp" placeholder="необязательно...">
         </div>
       </div>
       <div class="date-compact-row">
