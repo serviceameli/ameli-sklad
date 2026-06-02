@@ -1476,15 +1476,14 @@ function delVisit(i){
   // Строим текст подтверждения
   const realOrders = (visit.orders||[]).filter(o=>o.id&&o.id!=='__other__');
   const hasOtherFlag = (visit.orders||[]).some(o=>o.id==='__other__');
-  let ordersText = '';
+  const lines = [];
   if(realOrders.length){
     const isReturn = ['return','dropoff','both'].includes(visit.operation);
     const action = isReturn ? 'возврат' : 'выдачу';
-    ordersText = `Заказ${realOrders.length>1?'ы':''} ${realOrders.map(o=>o.id).join(', ')} вернётся на ${action}.`;
-  } else if(hasOtherFlag){
-    ordersText = 'Визит «не из списка» будет удалён.';
+    lines.push(`Заказ${realOrders.length>1?'ы':''} ${realOrders.map(o=>o.id).join(', ')} вернётся на ${action}.`);
   }
-  const msg = `Удалить визит?\n${ordersText}`;
+  if(hasOtherFlag) lines.push('Заказ не из списка будет удалён.');
+  const msg = `Удалить визит?\n${lines.join('\n')}`;
   if(!confirm(msg)) return;
 
   // Немедленно убираем из серверных наборов — чтобы не мигало после refresh
