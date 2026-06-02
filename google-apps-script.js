@@ -518,6 +518,8 @@ function getAllShifts() {
       // Add order to this visit
       if (r[10] && r[10] !== '(нет в списке)') {
         visit.orders.push({ id: r[10], client: r[11]||'', returnDate: r[12]||'', delivery: r[13]||'' });
+      } else if (r[10] === '(нет в списке)') {
+        visit.isOther = true;
       }
     }
   });

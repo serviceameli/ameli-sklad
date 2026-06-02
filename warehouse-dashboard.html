@@ -570,9 +570,13 @@ function renderOrders(){
     return 'pending';
   };
 
-  // «Нет в списке» визиты — сегодняшние из otherVisits
+  // «Нет в списке» визиты — из allVisits по флагу isOther + фильтр по сегодняшней дате
   const todayStr2 = todayMsk();
-  const otherToday = serverProcessed.otherVisits; // уже за всё время, но для счётчика используем все
+  const otherToday = allVisits.filter(v => {
+    if(!v.isOther) return false;
+    const d = shiftDateToISO(v.shiftDate) || (v.ts||'').split('T')[0];
+    return d === todayStr2;
+  });
   const otherIssued   = otherToday.filter(v=>['issue','pickup','both'].includes(v.operation));
   const otherReturned = otherToday.filter(v=>['return','dropoff','both'].includes(v.operation));
 
