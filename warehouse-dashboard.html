@@ -433,7 +433,7 @@ const DAYS   = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
 const VIS    = {client:'Клиент',yandex:'Яндекс',our:'Наш курьер'};
 const OPL    = {issue:'Выдача',return:'Возврат',pickup:'Получение',dropoff:'Возврат',both:'Получ.+Возврат'};
 
-let allShifts=[], allVisits=[], todayOrders=[];
+let allShifts=[], allVisits=[], todayOrders=[], serverProcessed={issued:[],returned:[]};
 let statsPeriod=30, wPeriod=30, tsPeriod=30, logPeriod=7, hPeriod=30;
 let charts={};
 
@@ -472,6 +472,7 @@ async function loadData(){
       const j=await r.json();
       allShifts  = j.shifts||local;
       todayOrders= j.orders||[];
+      if(j.processedOrders) serverProcessed={issued:j.processedOrders.issued||[],returned:j.processedOrders.returned||[]};
     }catch(e){ allShifts=local; todayOrders=[]; }
   }
 
@@ -532,30 +533,20 @@ function switchTab(t){
 // ══════════════════════════════════════════
 // ORDERS TODAY
 // ══════════════════════════════════════════
-// shiftDate может прийти как "02.06.2026" или как ISO-строка из Sheets Date объекта
-// Sheets хранит дату как Date(полночь МСК) → UTC "2026-06-01T21:00:00Z" → нужен +3ч
+// shiftDate может прийти как "02.06.2026" или как ISO-строка из Sheets Date
+// Sheets хранит дату как Date(полночь МСК) = UTC предыдущего дня → нужен +3ч
 function shiftDateToISO(sd){
   if(!sd) return '';
   const s = sd.toString();
   if(/^\d{2}\.\d{2}\.\d{4}/.test(s)){ const [d,m,y]=s.split('.'); return `${y}-${m}-${d}`; }
-  // ISO timestamp → переводим в МСК (+3ч) и берём дату
   const msk = new Date(new Date(s).getTime() + MSK_OFFSET*3600000);
   return msk.toISOString().split('T')[0];
 }
 
 function getOrderStatuses(){
-  const todayStr = todayMsk();
-  const issued=new Set(), returned=new Set();
-  allVisits.forEach(v=>{
-    // Используем shiftDate (МСК) — UTC-дата ts ненадёжна для ночных смен
-    const d = shiftDateToISO(v.shiftDate) || (v.ts||'').split('T')[0];
-    if(d!==todayStr) return;
-    v.ordersArr.forEach(o=>{
-      if(!o.id||o.id==='__other__') return;
-      if(['issue','pickup'].includes(v.operation)) issued.add(o.id);
-      if(['return','dropoff','both'].includes(v.operation)) returned.add(o.id);
-    });
-  });
+  // Используем processedOrders от сервера — те же данные что и у кладовщика
+  const issued   = new Set(serverProcessed.issued);
+  const returned = new Set(serverProcessed.returned);
   return {issued,returned};
 }
 
@@ -592,7 +583,7 @@ function renderOrders(){
   // Карта orderId → comment из allVisits (сегодняшние визиты)
   const todayStr = todayMsk();
   const commentMap = {};
-  allVisits.filter(v=>shiftDateToISO(v.shiftDate)===(todayStr)||((v.ts||'').startsWith(todayStr))).forEach(v=>{
+  allVisits.filter(v=>{ const d=shiftDateToISO(v.shiftDate)||(v.ts||'').split('T')[0]; return d===todayStr; }).forEach(v=>{
     if(!v.comment) return;
     (v.ordersArr||[]).forEach(o=>{ if(o.id&&o.id!=='__other__') commentMap[o.id]=v.comment; });
   });

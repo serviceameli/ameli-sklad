@@ -36,7 +36,7 @@ function doGet(e) {
     return jsonResponse(resp);
   }
   if (action === 'getAll') {
-    return jsonResponse({ shifts: getAllShifts(), orders: getTodayOrders() });
+    return jsonResponse({ shifts: getAllShifts(), orders: getTodayOrders(), processedOrders: getProcessedOrderIds() });
   }
   return jsonResponse({ error: 'Unknown action' });
 }
