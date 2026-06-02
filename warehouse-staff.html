@@ -280,11 +280,11 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
 .vbtn.act.c{background:var(--client)}
 .vbtn.act.y{background:var(--yandex)}
 .vbtn.act.o{background:var(--our)}
-/* ── TIME+COMMENT ROW ── */
-.tc2-row{display:flex;gap:8px;align-items:flex-end;margin-top:7px}
-.tc2-row .field-g{display:flex;flex-direction:column}
-.tc2-row .field-g:first-child{flex:0 0 88px}
-.tc2-row .field-g input{flex:1}
+/* ── TIME+COMMENT ── */
+.tc2-row{display:flex;flex-direction:column;gap:6px;margin-top:7px}
+.tc2-time-row{display:flex;align-items:center;gap:10px}
+.tc2-time-row .flbl{margin:0;white-space:nowrap;flex-shrink:0}
+.tc2-time-row .time-inp{width:100px;flex-shrink:0}
 /* ── COMPACT DATE ── */
 .date-compact-row{margin-top:5px;margin-bottom:2px}
 .date-compact-lbl{font-size:11px;color:var(--muted);font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:4px;padding:3px 0;user-select:none}
@@ -521,11 +521,11 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
       </div>
 
       <div class="tc2-row">
-        <div class="field-g">
+        <div class="tc2-time-row">
           <label class="flbl">Время (МСК)</label>
           <input class="time-inp" id="timeInp" type="time">
         </div>
-        <div class="field-g" style="flex:1">
+        <div class="field-g">
           <label class="flbl">Комментарий</label>
           <input type="text" class="comment-inp" id="commentInp" placeholder="необязательно...">
         </div>
