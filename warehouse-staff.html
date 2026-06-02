@@ -1472,6 +1472,13 @@ function renderTable(){
 function delVisit(i){ visits.splice(i,1); visits.forEach((v,j)=>v.n=j+1); renderTable(); updateOrdersBar(); renderOrderCards(); populateOrders(); saveDraft(); }
 
 // ── ORDERS BAR ──
+// Объединяет «не из списка» визиты из сессии + сервера (без дублей по time)
+function getOtherVisits(){
+  const sessionOther = visits.filter(v=>(v.orders||[]).some(o=>o.id==='__other__'));
+  const sessionTimes = new Set(sessionOther.map(v=>v.time));
+  return [...sessionOther, ...serverOtherVisits.filter(v=>!sessionTimes.has(v.time))];
+}
+
 function updateOrdersBar(){
   const {issuedIds,returnedIds}=getSessionStatuses();
   let p=0,is=0,re=0,ov=0;
@@ -1481,6 +1488,13 @@ function updateOrdersBar(){
     else if(o.sameDay&&eff==='return') { is++; p++; } // выдан + ожидает возврата
     else if(o.overdue)      ov++;
     else                    p++;
+  });
+  // Добавляем «не из списка» визиты
+  getOtherVisits().forEach(v=>{
+    const isReturn=['return','dropoff','both'].includes(v.operation);
+    const isIssue =['issue','pickup','both'].includes(v.operation);
+    if(isReturn) re++;
+    else if(isIssue) is++;
   });
   document.getElementById('bar-pending').textContent=p;
   document.getElementById('bar-issued').textContent=is;
@@ -1513,9 +1527,15 @@ function renderOrderCards(){
   });
   const oc=display.filter(o=>o.overdue&&o.eff!=='done').length;
   const pc=display.filter(o=>!o.overdue&&(o.eff==='issue'||o.eff==='return')).length;
+  const otherV=getOtherVisits();
+  const otherIc=otherV.filter(v=>['issue','pickup'].includes(v.operation)).length
+               +otherV.filter(v=>v.operation==='both').length;
+  const otherRc=otherV.filter(v=>['return','dropoff','both'].includes(v.operation)).length;
   const ic=display.filter(o=>o.eff==='done'&&o.type==='issue'&&!o.sameDay).length
-         + display.filter(o=>o.eff==='return'&&o.sameDay).length; // однодневка выдана, ждёт возврата
-  const rc=display.filter(o=>o.eff==='done'&&(o.type==='return'||o.sameDay)).length;
+         + display.filter(o=>o.eff==='return'&&o.sameDay).length // однодневка выдана, ждёт возврата
+         + otherIc;
+  const rc=display.filter(o=>o.eff==='done'&&(o.type==='return'||o.sameDay)).length
+         + otherRc;
   document.getElementById('ordersMini').innerHTML=[
     ['Ожидают','var(--pending)',pc],['Выдано','var(--issued)',ic],['Возвращено','var(--ret)',rc]
   ].map(([l,c,n])=>`<div class="osc" style="border-top:2px solid ${c}"><div class="osc-l">${l}</div><div class="osc-n">${n}</div></div>`).join('');
@@ -1544,11 +1564,7 @@ function renderOrderCards(){
     html+=pendingReturn.map(o=>orderCard(o)).join('');
   }
   // Визиты «не из списка»: из текущей сессии + с сервера (для режима просмотра)
-  const sessionOtherVisits = visits.filter(v=>(v.orders||[]).some(o=>o.id==='__other__'));
-  // Дедуплицируем: serverOtherVisits — только те, которых нет в текущей сессии (по time)
-  const sessionOtherTimes = new Set(sessionOtherVisits.map(v=>v.time));
-  const extraOtherVisits = serverOtherVisits.filter(v=>!sessionOtherTimes.has(v.time));
-  const otherVisits = [...sessionOtherVisits, ...extraOtherVisits];
+  const otherVisits = getOtherVisits();
   const otherCards = otherVisits.map(v=>otherVisitCard(v)).join('');
   const doneTotal = done.length + sameDayIssued.length + otherVisits.length;
 
