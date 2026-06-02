@@ -177,7 +177,7 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
 .time-inp{border:2px solid var(--accent);border-radius:9px;background:rgba(245,197,24,.06);padding:6px 7px;font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:var(--black);width:100%;text-align:center}
 .time-inp:focus{outline:none;border-color:var(--black);background:var(--card)}
 .inp-hint{font-size:9px;color:var(--muted);font-weight:500;margin-top:2px;text-align:center}
-.comment-inp{border:2px solid var(--rule);border-radius:9px;background:var(--bg);padding:6px 9px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:500;color:var(--black);resize:none;width:100%;height:36px}
+.comment-inp{border:2px solid var(--rule);border-radius:9px;background:var(--bg);padding:6px 9px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:500;color:var(--black);resize:none;width:100%;height:34px;box-sizing:border-box}
 .comment-inp:focus{outline:none;border-color:var(--accent)}
 .add-btn{width:100%;height:41px;border-radius:11px;border:none;background:var(--accent);color:var(--black);font-size:13px;cursor:pointer;font-weight:700;font-family:'Montserrat',sans-serif;margin-top:7px}
 .add-btn:active{transform:scale(.98)}
@@ -271,17 +271,18 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
 .sr-v{font-size:12px;font-weight:700;color:var(--black)}
 .btn-again{width:100%;background:var(--accent);color:var(--black);border:none;border-radius:13px;padding:14px;font-family:'Montserrat',sans-serif;font-size:14px;font-weight:700;cursor:pointer}
 
-/* ── VERTICAL VISITOR BUTTONS ── */
-.vis-btns{display:flex;flex-direction:column;gap:8px}
-.vbtn{width:100%;border:2px solid var(--rule);background:var(--card);border-radius:12px;padding:14px 16px;font-family:'Montserrat',sans-serif;font-size:15px;font-weight:700;color:var(--text);cursor:pointer;text-align:left;transition:all .14s;display:flex;align-items:center;gap:10px}
-.vbtn:active{transform:scale(.98)}
+/* ── VISITOR BUTTONS (horizontal row) ── */
+.vis-btns{display:flex;flex-direction:row;gap:7px}
+.vbtn{flex:1;border:2px solid var(--rule);background:var(--card);border-radius:12px;padding:10px 4px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:700;color:var(--text);cursor:pointer;text-align:center;transition:all .14s;display:flex;flex-direction:column;align-items:center;gap:4px;line-height:1.2}
+.vbtn .vbtn-icon{font-size:20px}
+.vbtn:active{transform:scale(.97)}
 .vbtn.act{color:#fff;border-color:transparent}
 .vbtn.act.c{background:var(--client)}
 .vbtn.act.y{background:var(--yandex)}
 .vbtn.act.o{background:var(--our)}
 /* ── TIME+COMMENT ROW ── */
-.tc2-row{display:flex;gap:8px;align-items:flex-end;margin-top:7px}
-.tc2-row .field-g:first-child{flex:0 0 90px}
+.tc2-row{display:flex;gap:8px;align-items:flex-start;margin-top:7px}
+.tc2-row .field-g:first-child{flex:0 0 88px}
 /* ── COMPACT DATE ── */
 .date-compact-row{margin-top:5px;margin-bottom:2px}
 .date-compact-lbl{font-size:11px;color:var(--muted);font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:4px;padding:3px 0;user-select:none}
@@ -495,9 +496,9 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
       <div style="margin-bottom:10px">
         <label class="flbl">Кто приехал</label>
         <div class="vis-btns">
-          <button class="vbtn c" onclick="setVisitor('client',this)">🧑 Клиент</button>
-          <button class="vbtn y" onclick="setVisitor('yandex',this)">🚕 Курьер Яндекс</button>
-          <button class="vbtn o" onclick="setVisitor('our',this)">🚛 Наш курьер</button>
+          <button class="vbtn c" onclick="setVisitor('client',this)"><span class="vbtn-icon">🧑</span>Клиент</button>
+          <button class="vbtn y" onclick="setVisitor('yandex',this)"><span class="vbtn-icon">🚕</span>Курьер Яндекс</button>
+          <button class="vbtn o" onclick="setVisitor('our',this)"><span class="vbtn-icon">🚛</span>Наш курьер</button>
         </div>
       </div>
 
