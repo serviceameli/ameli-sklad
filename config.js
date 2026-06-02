@@ -5,4 +5,4 @@
 //  Оба файла (staff и dashboard) подхватят автоматически.
 // ═══════════════════════════════════════════════════════════
 
-const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwMCM3XOyE13nETeH1ZaGbmD6qxDxxxkYlLVsCbcwfXxFhFQgxr1qZ_EHjLGDzbX8Y/exec';
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxdyP66s9-fsfmgL4MrzQrZWnj4wRUtq6PzFVLSPnSTXoeWfuLOQ0wG4-OEApEwUTk/exec';
