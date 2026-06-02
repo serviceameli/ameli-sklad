@@ -533,11 +533,14 @@ function switchTab(t){
 // ORDERS TODAY
 // ══════════════════════════════════════════
 // shiftDate может прийти как "02.06.2026" или как ISO-строка из Sheets Date объекта
+// Sheets хранит дату как Date(полночь МСК) → UTC "2026-06-01T21:00:00Z" → нужен +3ч
 function shiftDateToISO(sd){
   if(!sd) return '';
   const s = sd.toString();
   if(/^\d{2}\.\d{2}\.\d{4}/.test(s)){ const [d,m,y]=s.split('.'); return `${y}-${m}-${d}`; }
-  return s.split('T')[0];
+  // ISO timestamp → переводим в МСК (+3ч) и берём дату
+  const msk = new Date(new Date(s).getTime() + MSK_OFFSET*3600000);
+  return msk.toISOString().split('T')[0];
 }
 
 function getOrderStatuses(){
