@@ -846,9 +846,6 @@ function saveDraft(){
     fetch(SCRIPT_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({...draft,isDraft:true,shiftDate:new Date().toLocaleDateString('ru'),totalEntries:visits.length,entries:visits})}).catch(()=>{});
   }
-  const b=document.getElementById('saveBanner');
-  document.getElementById('saveText').textContent='Черновик сохранён в '+nowTime()+' МСК';
-  b.classList.add('show'); setTimeout(()=>b.classList.remove('show'),3000);
 }
 function startAutosave(){ stopAutosave(); autosaveTimer=setInterval(saveDraft,AUTOSAVE_INT); }
 function stopAutosave(){ if(autosaveTimer){clearInterval(autosaveTimer);autosaveTimer=null;} }
