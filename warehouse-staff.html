@@ -1528,25 +1528,16 @@ function renderOrderCards(){
     html+=sameDayLocked.map(o=>orderCard(o,'locked')).join('');
     html+=pendingReturn.map(o=>orderCard(o)).join('');
   }
-  if(done.length||sameDayIssued.length){
-    html+=`<div class="sec-lbl" style="color:var(--issued)">✓ Выдано / Возвращено (${done.length+sameDayIssued.length})</div>`;
+  // Визиты «нет в списке» из текущей сессии — добавляем в секцию «Выдано/Возвращено»
+  const otherVisits = visits.filter(v=>(v.orders||[]).some(o=>o.id==='__other__'));
+  const otherCards = otherVisits.map(v=>otherVisitCard(v)).join('');
+  const doneTotal = done.length + sameDayIssued.length + otherVisits.length;
+
+  if(doneTotal){
+    html+=`<div class="sec-lbl" style="color:var(--issued)">✓ Выдано / Возвращено (${doneTotal})</div>`;
     html+=sameDayIssued.map(o=>orderCard(o,'sameday-issued')).join('');
     html+=done.map(o=>orderCard(o)).join('');
-  }
-  // Визиты «нет в списке» из текущей сессии
-  const otherVisits = visits.filter(v=>(v.orders||[]).some(o=>o.id==='__other__'));
-  if(otherVisits.length){
-    html+=`<div class="sec-lbl" style="color:var(--yandex)">⚠️ Нет в списке (${otherVisits.length})</div>`;
-    html+=otherVisits.map(v=>{
-      const opLabel=OP_LBL[v.operation]||v.operation||'—';
-      const visLabel=VIS_LBL[v.visitor]||v.visitor||'—';
-      const commentHtml=v.comment?`<div style="font-size:11px;color:var(--muted);margin-top:4px;font-style:italic">💬 ${v.comment}</div>`:'';
-      return`<div class="order-card" style="border-left-color:var(--yandex)">
-        <div class="oc-top"><span class="oc-id">⚠️ Не в списке</span><span class="oc-status" style="background:rgba(255,107,53,.15);color:#b84a1a">${opLabel}</span></div>
-        <div class="oc-client">${visLabel} · ${v.time||'—'}</div>
-        ${commentHtml}
-      </div>`;
-    }).join('');
+    html+=otherCards;
   }
 
   if(!orders.length && !otherVisits.length) html=`<div style="text-align:center;padding:32px;color:var(--light)"><div style="font-size:26px;margin-bottom:7px">📭</div><div style="font-size:13px;font-weight:600">Нет заказов на сегодня</div></div>`;
@@ -1573,6 +1564,21 @@ function orderCard(o, modifier){
     <div class="oc-top"><span class="oc-id">${o.id}</span><span class="oc-status ${cls}">${txt}</span></div>
     <div class="oc-client">${o.client||'—'}</div>
     <div class="oc-meta"><span>📅 возврат ${o.returnDate||'—'}</span><span>${o.delivery?.includes('Наш')?'🚛':'🚶'} ${o.delivery||'—'}</span>${workerHint}</div>
+  </div>`;
+}
+
+function otherVisitCard(v){
+  const isReturn = ['return','dropoff','both'].includes(v.operation);
+  const cls = isReturn ? 'returned' : 'issued';
+  const txt = isReturn ? '✓ Возвращён' : '✓ Выдан';
+  const deliveryMap = {client:'🚶 Самовывоз', yandex:'🚕 Курьер Яндекс', our:'🚛 Наша доставка'};
+  const delivery = deliveryMap[v.visitor] || v.visitor || '—';
+  const commentHtml = v.comment ? `<div style="font-size:10px;color:var(--muted);margin-top:3px;font-style:italic">💬 ${v.comment}</div>` : '';
+  return`<div class="order-card ${cls}">
+    <div class="oc-top"><span class="oc-id" style="color:var(--yandex)">⚠️ нет в списке</span><span class="oc-status ${cls}">${txt}</span></div>
+    <div class="oc-client">— · ${v.time||'—'}</div>
+    <div class="oc-meta"><span>${delivery}</span><span class="oc-worker">👤 ${worker||'—'}</span></div>
+    ${commentHtml}
   </div>`;
 }
 
