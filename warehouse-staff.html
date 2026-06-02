@@ -1386,7 +1386,7 @@ function renderTable(){
   const rowHtml=v=>{
     const showDate=v.date&&v.date!==today;
     const dayName=v.date?DAYS_SHORT[new Date(v.date+'T12:00').getDay()]:'';
-    const datePart=showDate?`<span class="date-chip" style="color:#FF6B35">⚠️${dayName} ${new Date(v.date+'T12:00').toLocaleDateString('ru',{day:'numeric',month:'short'})}</span>`:
+    const datePart=showDate?`<span class="date-chip" style="color:var(--muted)">📅 ${dayName} ${new Date(v.date+'T12:00').toLocaleDateString('ru',{day:'numeric',month:'short'})}</span>`:
       `<span class="date-chip" style="color:var(--light)">${DAYS_SHORT[new Date().getDay()]}</span>`;
     const ords=v.orders||[];
     const ordHtml=ords.length?`<div class="order-tags">`+ords.map(o=>{
