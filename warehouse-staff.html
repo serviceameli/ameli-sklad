@@ -1436,14 +1436,15 @@ function renderTable(){
       `<span class="date-chip" style="color:var(--light)">${DAYS_SHORT[new Date().getDay()]}</span>`;
     const ords=v.orders||[];
     const ordHtml=ords.length?`<div class="order-tags">`+ords.map(o=>{
-      if(o.id==='__other__') return`<div class="order-tag">⚠️</div>`;
+      if(o.id==='__other__') return`<div class="order-tag" style="background:rgba(255,107,53,.1);border-color:var(--yandex);color:var(--yandex)">⚠️ нет в списке</div>`;
       return`<div class="order-tag"><span>${o.id}</span>${o.client?`<span class="tag-client">${o.client}</span>`:''}</div>`;
     }).join('')+`</div>`:`<span style="font-size:10px;color:var(--light)">—</span>`;
+    const commentHtml=v.comment?`<div style="font-size:10px;color:var(--muted);margin-top:3px;font-style:italic">💬 ${v.comment}</div>`:'';
     return`<tr class="lrow${isDoneVisit(v)?' lrow-done':''}">
       <td style="min-width:58px"><span class="time-chip">${v.time}</span>${datePart}</td>
       <td><span class="tchip ${v.visitor}">${VIS_LBL[v.visitor]}</span></td>
       <td><span class="ochip ${v.operation}">${OP_LBL[v.operation]}</span></td>
-      <td>${ordHtml}</td>
+      <td>${ordHtml}${commentHtml}</td>
       <td><span class="time-rec">${v.timeAuto||'—'}</span></td>
       <td><button class="dbtn" onclick="delVisit(${visits.indexOf(v)})">×</button></td>
     </tr>`;
@@ -1532,7 +1533,23 @@ function renderOrderCards(){
     html+=sameDayIssued.map(o=>orderCard(o,'sameday-issued')).join('');
     html+=done.map(o=>orderCard(o)).join('');
   }
-  if(!orders.length) html=`<div style="text-align:center;padding:32px;color:var(--light)"><div style="font-size:26px;margin-bottom:7px">📭</div><div style="font-size:13px;font-weight:600">Нет заказов на сегодня</div></div>`;
+  // Визиты «нет в списке» из текущей сессии
+  const otherVisits = visits.filter(v=>(v.orders||[]).some(o=>o.id==='__other__'));
+  if(otherVisits.length){
+    html+=`<div class="sec-lbl" style="color:var(--yandex)">⚠️ Нет в списке (${otherVisits.length})</div>`;
+    html+=otherVisits.map(v=>{
+      const opLabel=OP_LBL[v.operation]||v.operation||'—';
+      const visLabel=VIS_LBL[v.visitor]||v.visitor||'—';
+      const commentHtml=v.comment?`<div style="font-size:11px;color:var(--muted);margin-top:4px;font-style:italic">💬 ${v.comment}</div>`:'';
+      return`<div class="order-card" style="border-left-color:var(--yandex)">
+        <div class="oc-top"><span class="oc-id">⚠️ Не в списке</span><span class="oc-status" style="background:rgba(255,107,53,.15);color:#b84a1a">${opLabel}</span></div>
+        <div class="oc-client">${visLabel} · ${v.time||'—'}</div>
+        ${commentHtml}
+      </div>`;
+    }).join('');
+  }
+
+  if(!orders.length && !otherVisits.length) html=`<div style="text-align:center;padding:32px;color:var(--light)"><div style="font-size:26px;margin-bottom:7px">📭</div><div style="font-size:13px;font-weight:600">Нет заказов на сегодня</div></div>`;
   document.getElementById('ordersCards').innerHTML=html;
 }
 

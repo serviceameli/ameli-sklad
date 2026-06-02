@@ -955,8 +955,14 @@ function renderLog(){
   tbody.innerHTML=visits.map(v=>{
     const d=new Date(v.ts||v.shiftTs||new Date());
     const dStr=d.toLocaleDateString('ru',{day:'numeric',month:'short',timeZone:'Europe/Moscow'});
-    const ords=v.ordersArr.filter(o=>o.id&&o.id!=='__other__');
-    const ordHtml=ords.length?ords.map(o=>`<span class="onum" style="font-size:10px">${o.id}</span>${o.client?` <span style="font-size:9px;color:var(--muted)">${o.client}</span>`:''}`).join('<br>'):'—';
+    const ords=v.ordersArr.filter(o=>o.id&&o.id!=='__other__'&&o.id!=='(нет в списке)');
+    const hasOther=v.ordersArr.some(o=>o.id==='__other__'||o.id==='(нет в списке)');
+    const ordHtml=ords.length
+      ? ords.map(o=>`<span class="onum" style="font-size:10px">${o.id}</span>${o.client?` <span style="font-size:9px;color:var(--muted)">${o.client}</span>`:''}`).join('<br>')
+        + (hasOther?`<br><span style="font-size:10px;color:#b84a1a">⚠️ нет в списке</span>`:'')
+      : hasOther
+        ? `<span style="font-size:10px;color:#b84a1a">⚠️ нет в списке</span>`
+        : '—';
     return `<tr>
       <td>${dStr}</td>
       <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted)">${v.time||'—'}</td>
@@ -965,7 +971,7 @@ function renderLog(){
       <td>${v.visitor?`<span class="badge ${v.visitor}">${VIS[v.visitor]||v.visitor}</span>`:'—'}</td>
       <td style="font-size:11px;font-weight:600;color:var(--mid)">${OPL[v.operation]||v.operation||'—'}</td>
       <td>${ordHtml}</td>
-      <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted)">${ords.length||'—'}</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted)">${ords.length||(hasOther?'⚠️':'—')}</td>
       <td style="font-size:11px;color:var(--muted)">${v.comment||'—'}</td>
     </tr>`;
   }).join('');
@@ -975,9 +981,13 @@ function exportCSV(){
   const cutoff=new Date(Date.now()-logPeriod*864e5);
   const visits=allVisits.filter(v=>new Date(v.ts||v.shiftTs||new Date())>=cutoff);
   const rows=visits.flatMap(v=>{
-    const ords=v.ordersArr.filter(o=>o.id&&o.id!=='__other__');
-    if(!ords.length) return [[new Date(v.ts||v.shiftTs||new Date()).toLocaleDateString('ru',{timeZone:'Europe/Moscow'}),v.time||'',v.isNight?'Ночь':'День',v.worker||'',VIS[v.visitor]||v.visitor||'',OPL[v.operation]||v.operation||'','','','',v.comment||'']];
-    return ords.map(o=>[new Date(v.ts||v.shiftTs||new Date()).toLocaleDateString('ru',{timeZone:'Europe/Moscow'}),v.time||'',v.isNight?'Ночь':'День',v.worker||'',VIS[v.visitor]||v.visitor||'',OPL[v.operation]||v.operation||'',o.id,o.client||'',o.returnDate||'',v.comment||'']);
+    const ords=v.ordersArr.filter(o=>o.id&&o.id!=='__other__'&&o.id!=='(нет в списке)');
+    const hasOtherCSV=v.ordersArr.some(o=>o.id==='__other__'||o.id==='(нет в списке)');
+    const baseRow=[new Date(v.ts||v.shiftTs||new Date()).toLocaleDateString('ru',{timeZone:'Europe/Moscow'}),v.time||'',v.isNight?'Ночь':'День',v.worker||'',VIS[v.visitor]||v.visitor||'',OPL[v.operation]||v.operation||''];
+    const rows2=ords.map(o=>[...baseRow,o.id,o.client||'',o.returnDate||'',v.comment||'']);
+    if(hasOtherCSV) rows2.push([...baseRow,'(нет в списке)','','',v.comment||'']);
+    if(!rows2.length) rows2.push([...baseRow,'','','',v.comment||'']);
+    return rows2;
   });
   const csv=[['Дата','Время визита (МСК)','Сутки','Кладовщик','Кто','Операция','Заказ','Клиент','Дата возврата','Комментарий'],...rows].map(r=>r.join(';')).join('\n');
   const a=document.createElement('a');
