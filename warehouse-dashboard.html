@@ -569,6 +569,14 @@ function renderOrders(){
     <div class="sc bl"><div class="sc-lbl">К возврату — ожидают</div><div class="sc-n">${pR}</div><div class="sc-s">из ${toReturn.length}</div></div>
     <div class="sc gr"><div class="sc-lbl">Возвращено сегодня</div><div class="sc-n">${rR}</div><div class="sc-s">✓</div></div>`;
 
+  // Карта orderId → comment из allVisits (сегодняшние визиты)
+  const todayStr = todayMsk();
+  const commentMap = {};
+  allVisits.filter(v=>(v.ts||'').startsWith(todayStr)).forEach(v=>{
+    if(!v.comment) return;
+    (v.ordersArr||[]).forEach(o=>{ if(o.id&&o.id!=='__other__') commentMap[o.id]=v.comment; });
+  });
+
   // Pending first, done last
   const rowOf = (o,typeLabel) => {
     const s = statusOf(o);
@@ -585,10 +593,11 @@ function renderOrders(){
       ? `<span class="badge pending">⏳ Ожидает</span>`
       : `<span class="badge" style="background:rgba(61,155,233,.15);color:#1a6fa0">🔄 Ожидает</span>`;
     const timeInfo = o.issueTime||o.returnTime ? `<br><span style="font-size:10px;color:var(--muted)">${o.issueTime||o.returnTime}</span>` : '';
+    const commentHtml = commentMap[o.id] ? `<br><span style="font-size:10px;color:var(--muted);font-style:italic">💬 ${commentMap[o.id]}</span>` : '';
     return {done, html:`<tr>
       <td>${statusBadge}</td>
       <td><span class="onum">${o.id}</span></td>
-      <td><strong>${o.client||'—'}</strong>${o.company?`<br><span style="font-size:10px;color:var(--muted)">${o.company}</span>`:''}</td>
+      <td><strong>${o.client||'—'}</strong>${o.company?`<br><span style="font-size:10px;color:var(--muted)">${o.company}</span>`:''}${commentHtml}</td>
       <td style="font-family:'JetBrains Mono',monospace;font-size:11px">${dateRange}${timeInfo}</td>
       <td>${delivBadge}</td>
       <td>${o.worker?`<span style="font-size:11px;font-weight:600;color:var(--mid)">${o.worker}</span>`:'—'}</td>

@@ -1489,8 +1489,19 @@ function updateOrdersBar(){
   else{badge.style.display='none';}
 }
 
+// Строим карту orderId → comment из визитов текущей сессии
+let _commentMap={};
+function buildCommentMap(){
+  _commentMap={};
+  visits.forEach(v=>{
+    if(!v.comment) return;
+    (v.orders||[]).forEach(o=>{ if(o.id&&o.id!=='__other__') _commentMap[o.id]=v.comment; });
+  });
+}
+
 // ── ORDER CARDS ──
 function renderOrderCards(){
+  buildCommentMap();
   const {issuedIds,returnedIds,issuedBy,returnedBy}=getSessionStatuses();
   const display=orders.map(o=>{
     const eff=getEffectiveOrderType(o,issuedIds,returnedIds);
@@ -1560,10 +1571,12 @@ function orderCard(o, modifier){
     : eff==='done' && o.issuedBy
       ? `<span class="oc-worker">👤 ${o.issuedBy}</span>`
     : '';
+  const commentHtml=_commentMap[o.id]?`<div style="font-size:10px;color:var(--muted);margin-top:3px;font-style:italic">💬 ${_commentMap[o.id]}</div>`:'';
   return`<div class="order-card ${cls}" style="${opacity}">
     <div class="oc-top"><span class="oc-id">${o.id}</span><span class="oc-status ${cls}">${txt}</span></div>
     <div class="oc-client">${o.client||'—'}</div>
     <div class="oc-meta"><span>📅 возврат ${o.returnDate||'—'}</span><span>${o.delivery?.includes('Наш')?'🚛':'🚶'} ${o.delivery||'—'}</span>${workerHint}</div>
+    ${commentHtml}
   </div>`;
 }
 
