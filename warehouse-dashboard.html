@@ -959,9 +959,9 @@ function renderLog(){
     const hasOther=v.ordersArr.some(o=>o.id==='__other__'||o.id==='(нет в списке)');
     const ordHtml=ords.length
       ? ords.map(o=>`<span class="onum" style="font-size:10px">${o.id}</span>${o.client?` <span style="font-size:9px;color:var(--muted)">${o.client}</span>`:''}`).join('<br>')
-        + (hasOther?`<br><span style="font-size:10px;color:#b84a1a">⚠️ нет в списке</span>`:'')
+        + (hasOther?`<br><span style="font-size:10px;color:#b84a1a">⚠️ Заказ не из списка</span>`:'')
       : hasOther
-        ? `<span style="font-size:10px;color:#b84a1a">⚠️ нет в списке</span>`
+        ? `<span style="font-size:10px;color:#b84a1a">⚠️ Заказ не из списка</span>`
         : '—';
     return `<tr>
       <td>${dStr}</td>

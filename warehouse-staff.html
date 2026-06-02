@@ -1436,7 +1436,7 @@ function renderTable(){
       `<span class="date-chip" style="color:var(--light)">${DAYS_SHORT[new Date().getDay()]}</span>`;
     const ords=v.orders||[];
     const ordHtml=ords.length?`<div class="order-tags">`+ords.map(o=>{
-      if(o.id==='__other__') return`<div class="order-tag" style="background:rgba(255,107,53,.1);border-color:var(--yandex);color:var(--yandex)">⚠️ нет в списке</div>`;
+      if(o.id==='__other__') return`<div class="order-tag" style="background:rgba(255,107,53,.1);border-color:var(--yandex);color:var(--yandex)">⚠️ Заказ не из списка</div>`;
       return`<div class="order-tag"><span>${o.id}</span>${o.client?`<span class="tag-client">${o.client}</span>`:''}</div>`;
     }).join('')+`</div>`:`<span style="font-size:10px;color:var(--light)">—</span>`;
     const commentHtml=v.comment?`<div style="font-size:10px;color:var(--muted);margin-top:3px;font-style:italic">💬 ${v.comment}</div>`:'';
