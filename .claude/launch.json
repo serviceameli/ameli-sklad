@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "presentation",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "--directory", "/Users/ameli/CLAUDE/Презентация банкетным площадкам", "7788"],
+      "port": 7788
+    }
+  ]
+}

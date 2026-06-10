@@ -456,6 +456,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   document.getElementById('todayDateLbl').textContent =
     new Date().toLocaleDateString('ru',{weekday:'long',day:'numeric',month:'long',timeZone:'Europe/Moscow'});
   loadData();
+  setInterval(loadData, 120000); // автообновление раз в 2 минуты
 });
 
 function fmt(d){ return d instanceof Date ? d.toISOString().split('T')[0] : d; }
@@ -481,6 +482,12 @@ async function loadData(){
   allShifts.forEach(s=>{
     (s.entries||[]).forEach(e=>{
       const hour = parseMskHour(e.time||'');
+      // Дата визита: приоритет — колонка «Дата визита» из лога (e.date, yyyy-mm-dd),
+      // затем дата смены. Раньше использовался shiftStart (UTC) → визиты ночных смен
+      // и смен, начатых после полуночи, попадали не на тот день.
+      const dISO = (e.date && /^\d{4}-\d{2}-\d{2}/.test(e.date) ? e.date.slice(0,10) : '')
+                 || shiftDateToISO(s.shiftDate)
+                 || (e.timestamp||s.shiftStart||'').toString().split('T')[0];
       allVisits.push({
         ...e,
         worker:    s.worker,
@@ -489,6 +496,8 @@ async function loadData(){
         shiftEnd:  s.shiftEnd,
         shiftIsNight: s.isNight,
         ts:        e.timestamp||s.shiftStart||new Date().toISOString(),
+        dateISO:   dISO,
+        wd:        dISO ? new Date(dISO+'T12:00:00').getDay() : new Date().getDay(), // день недели по дате визита, не по таймзоне браузера
         hour,
         isNight:   e.night==='Ночь' || isNightHour(hour),
         // Normalise orders array
@@ -561,32 +570,37 @@ function renderOrders(){
     return 'issue';
   };
 
-  const toIssue  = todayOrders.filter(o=>{ const t=effectiveType(o); return t==='issue'; });
-  const toReturn = todayOrders.filter(o=>{ const t=effectiveType(o); return t==='return'; });
-
+  // ⚠️ Статус зависит от ТИПА заказа. Старая версия проверяла issued первым,
+  // и многодневный заказ «к возврату» (выданный неделю назад) показывался как «✓ Выдан».
   const statusOf = o => {
-    if(issued.has(o.id))   return 'issued';
-    if(returned.has(o.id)) return 'returned';
-    return 'pending';
+    const t = effectiveType(o);
+    if(t==='done')   return 'returned';                                 // однодневка закрыта
+    if(t==='return') return returned.has(o.id) ? 'returned' : 'pending';
+    return issued.has(o.id) ? 'issued' : 'pending';
   };
+
+  const overdueList = todayOrders.filter(o=>o.overdue && statusOf(o)==='pending');
+  const toIssue  = todayOrders.filter(o=>!o.overdue && effectiveType(o)==='issue');
+  const toReturn = todayOrders.filter(o=>!o.overdue && effectiveType(o)==='return');
 
   // «Нет в списке» визиты — из allVisits по флагу isOther + фильтр по сегодняшней дате
   const todayStr2 = todayMsk();
-  const otherToday = allVisits.filter(v => {
-    if(!v.isOther) return false;
-    const d = shiftDateToISO(v.shiftDate) || (v.ts||'').split('T')[0];
-    return d === todayStr2;
-  });
+  const otherToday = allVisits.filter(v => v.isOther && v.dateISO === todayStr2);
   const otherIssued   = otherToday.filter(v=>['issue','pickup','both'].includes(v.operation));
   const otherReturned = otherToday.filter(v=>['return','dropoff','both'].includes(v.operation));
 
-  // Summary
+  // Summary (при наличии просрочки карточек 5 — расширяем сетку)
+  document.getElementById('ordersSummary').style.gridTemplateColumns =
+    overdueList.length ? 'repeat(5,1fr)' : '';
   let pI=0,iI=0,pR=0,rR=0;
   toIssue.forEach(o=>{ const s=statusOf(o); if(s==='issued')iI++; else pI++; });
   toReturn.forEach(o=>{ const s=statusOf(o); if(s==='returned')rR++; else pR++; });
-  const totalIssued   = iI + otherIssued.length;
+  // Однодневки, уже выданные (они в toReturn) — это тоже сегодняшние выдачи
+  const sameDayIssuedCnt = todayOrders.filter(o=>o.sameDay && issued.has(o.id)).length;
+  const totalIssued   = iI + sameDayIssuedCnt + otherIssued.length;
   const totalReturned = rR + otherReturned.length;
   document.getElementById('ordersSummary').innerHTML=`
+    ${overdueList.length?`<div class="sc" style="border-left:3px solid #E74C3C"><div class="sc-lbl">🔴 Просрочено</div><div class="sc-n" style="color:#E74C3C">${overdueList.length}</div><div class="sc-s">требует внимания</div></div>`:''}
     <div class="sc acc"><div class="sc-lbl">К выдаче — ожидают</div><div class="sc-n">${pI}</div><div class="sc-s">из ${toIssue.length}</div></div>
     <div class="sc gr"><div class="sc-lbl">Выдано сегодня</div><div class="sc-n">${totalIssued}</div><div class="sc-s">✓</div></div>
     <div class="sc bl"><div class="sc-lbl">К возврату — ожидают</div><div class="sc-n">${pR}</div><div class="sc-s">из ${toReturn.length}</div></div>
@@ -595,7 +609,7 @@ function renderOrders(){
   // Карта orderId → comment из allVisits (сегодняшние визиты)
   const todayStr = todayMsk();
   const commentMap = {};
-  allVisits.filter(v=>{ const d=shiftDateToISO(v.shiftDate)||(v.ts||'').split('T')[0]; return d===todayStr; }).forEach(v=>{
+  allVisits.filter(v=>v.dateISO===todayStr).forEach(v=>{
     if(!v.comment) return;
     (v.ordersArr||[]).forEach(o=>{ if(o.id&&o.id!=='__other__') commentMap[o.id]=v.comment; });
   });
@@ -612,6 +626,8 @@ function renderOrders(){
       ? `<span class="badge issued">✓ Выдан</span>`
       : s==='returned'
       ? `<span class="badge returned">✓ Возвращён</span>`
+      : o.overdue
+      ? `<span class="badge" style="background:rgba(231,76,60,.15);color:#c0392b">🔴 Просрочен</span>`
       : typeLabel==='issue'
       ? `<span class="badge pending">⏳ Ожидает</span>`
       : `<span class="badge" style="background:rgba(61,155,233,.15);color:#1a6fa0">🔄 Ожидает</span>`;
@@ -674,6 +690,7 @@ function renderOrders(){
 
   document.getElementById('ordersContent').innerHTML =
     `<div class="twrap scroll">` +
+    buildSection(overdueList,'issue','🔴 Просрочены') +
     buildSection(toIssue,'issue','📦 К выдаче сегодня') +
     buildSection(toReturn,'return','🔄 К возврату сегодня') +
     otherSection +
@@ -686,8 +703,8 @@ function renderOrders(){
 function setPeriodH(d,el){ hPeriod=d; document.querySelectorAll('#tab-schedule .pbtn').forEach(b=>b.classList.remove('active')); el.classList.add('active'); renderSchedule(); }
 
 function getHeatVisits(){
-  const cutoff=new Date(Date.now()-hPeriod*864e5);
-  return allVisits.filter(v=>new Date(v.ts)>=cutoff && v.hour!=null);
+  const cutoffISO=fmtMsk(new Date(mskNow().getTime()-hPeriod*864e5));
+  return allVisits.filter(v=>v.dateISO>=cutoffISO && v.hour!=null);
 }
 
 function renderSchedule(){
@@ -701,8 +718,10 @@ function renderInsights(data){
   if(!data.length){ document.getElementById('insightGrid').innerHTML='<div style="color:rgba(255,255,255,.4);grid-column:1/-1">Недостаточно данных</div>'; return; }
   const hc=Array(24).fill(0); data.forEach(v=>hc[v.hour]++);
   const pH=hc.indexOf(Math.max(...hc));
-  const wh=hc.slice(9,22); const qH=wh.indexOf(Math.min(...wh.filter(v=>v>0)))+9;
-  const dc=Array(7).fill(0); data.forEach(v=>dc[new Date(v.ts).getDay()]++);
+  const wh=hc.slice(9,22);
+  const whPos=wh.filter(v=>v>0);
+  const qH=whPos.length?wh.indexOf(Math.min(...whPos))+9:null; // guard: без данных был «08:00»
+  const dc=Array(7).fill(0); data.forEach(v=>dc[v.wd]++);
   const pD=dc.indexOf(Math.max(...dc));
   const nightPct=Math.round(data.filter(v=>v.isNight).length/data.length*100);
   // orders
@@ -711,7 +730,7 @@ function renderInsights(data){
   document.getElementById('insightGrid').innerHTML=`
     <div class="insight-item"><div class="insight-num" style="color:var(--accent)">${String(pH).padStart(2,'0')}:00</div><div class="insight-lbl">Пиковый час</div></div>
     <div class="insight-item"><div class="insight-num" style="color:#8899ff">${DAYS[pD]}</div><div class="insight-lbl">Загруженный день</div></div>
-    <div class="insight-item"><div class="insight-num" style="color:#2ECC71">${String(qH).padStart(2,'0')}:00</div><div class="insight-lbl">Тихий час</div></div>
+    <div class="insight-item"><div class="insight-num" style="color:#2ECC71">${qH==null?'—':String(qH).padStart(2,'0')+':00'}</div><div class="insight-lbl">Тихий час</div></div>
     <div class="insight-item"><div class="insight-num">${nightPct}%</div><div class="insight-lbl">Ночных визитов</div></div>
     <div class="insight-item"><div class="insight-num">${data.length}</div><div class="insight-lbl">Визитов за период</div></div>
     <div class="insight-item"><div class="insight-num">${avgOrd}</div><div class="insight-lbl">Заказов на визит</div></div>`;
@@ -721,7 +740,7 @@ function renderHeatmap(data){
   const HOURS=Array.from({length:16},(_,i)=>i+8);
   const grid=Array(7).fill(null).map(()=>Array(24).fill(0));
   const dc=Array(7).fill(0);
-  data.forEach(v=>{ const wd=new Date(v.ts).getDay(); if(v.hour>=8&&v.hour<=23){ grid[wd][v.hour]++; } dc[wd]++; });
+  data.forEach(v=>{ const wd=v.wd; if(v.hour>=8&&v.hour<=23){ grid[wd][v.hour]++; } dc[wd]++; });
   const norm=grid.map((row,wd)=>row.map(c=>dc[wd]?c/dc[wd]*100:0));
   const mx=Math.max(...norm.flat());
   const color=v=>{ if(!v)return{bg:'#f5f5f3',c:'#ddd'}; const r=v/mx; if(r>=.85)return{bg:'#E74C3C',c:'#fff'}; if(r>=.6)return{bg:'#FF6B35',c:'#fff'}; if(r>=.35)return{bg:'#F5C518',c:'#333'}; if(r>=.15)return{bg:'rgba(245,197,24,.35)',c:'#555'}; return{bg:'rgba(245,197,24,.1)',c:'#aaa'}; };
@@ -761,7 +780,7 @@ function setPeriod(d,el){
 
 function getStatVisits(){
   const fr=document.getElementById('dateFrom').value, to=document.getElementById('dateTo').value;
-  return allVisits.filter(v=>{ const d=v.ts?.split('T')[0]||''; return d>=fr&&d<=to; });
+  return allVisits.filter(v=>{ const d=v.dateISO||''; return d>=fr&&d<=to; });
 }
 
 function renderStats(){
@@ -773,7 +792,7 @@ function renderStats(){
   document.getElementById('sv-workers').textContent=new Set(data.map(v=>v.worker)).size;
   // orders
   const allOrds=data.flatMap(v=>v.ordersArr.filter(o=>o.id&&o.id!=='__other__'));
-  const issuedO=data.filter(v=>['issue','pickup'].includes(v.operation)).flatMap(v=>v.ordersArr.filter(o=>o.id&&o.id!=='__other__'));
+  const issuedO=data.filter(v=>['issue','pickup','both'].includes(v.operation)).flatMap(v=>v.ordersArr.filter(o=>o.id&&o.id!=='__other__'));
   const returnO=data.filter(v=>['return','dropoff','both'].includes(v.operation)).flatMap(v=>v.ordersArr.filter(o=>o.id&&o.id!=='__other__'));
   document.getElementById('so-total').textContent=allOrds.length;
   document.getElementById('so-issued').textContent=issuedO.length;
@@ -796,7 +815,7 @@ function renderTimeline(data){
   const lbls=dateLabels();
   const dayA=[],nightA=[],ordA=[];
   lbls.forEach(l=>{
-    const vs=data.filter(v=>(v.ts?.split('T')[0]||v.shiftDate)===l);
+    const vs=data.filter(v=>v.dateISO===l);
     dayA.push(vs.filter(v=>!v.isNight).length);
     nightA.push(vs.filter(v=>v.isNight).length);
     ordA.push(vs.reduce((s,v)=>s+v.ordersArr.filter(o=>o.id&&o.id!=='__other__').length,0));
@@ -812,7 +831,7 @@ function renderTimeline(data){
 
 function renderWeekday(data){
   const vc=Array(7).fill(0),dn=Array(7).fill(0),nn=Array(7).fill(0),dc2=Array(7).fill(0);
-  data.forEach(v=>{ const wd=new Date(v.ts||v.shiftTs||new Date()).getDay(); vc[wd]++; if(!v.isNight)dn[wd]++; else nn[wd]++; });
+  data.forEach(v=>{ const wd=v.wd; vc[wd]++; if(!v.isNight)dn[wd]++; else nn[wd]++; });
   const fr=new Date(document.getElementById('dateFrom').value), to=new Date(document.getElementById('dateTo').value);
   const c=new Date(fr); while(c<=to){ dc2[c.getDay()]++; c.setDate(c.getDate()+1); }
   const avg=vc.map((v,i)=>dc2[i]?+(v/dc2[i]).toFixed(1):0);
@@ -824,7 +843,7 @@ function renderWeekday(data){
 
 function renderMonthly(data){
   const m={};
-  data.forEach(v=>{ const d=new Date(v.ts||v.shiftTs||new Date()); const k=`${d.getFullYear()}-${String(d.getMonth()).padStart(2,'0')}`; if(!m[k])m[k]={c:0,y:0,o:0,lbl:MONTHS[d.getMonth()]+' '+(d.getFullYear()%100)}; if(v.visitor==='client')m[k].c++; else if(v.visitor==='yandex')m[k].y++; else if(v.visitor==='our')m[k].o++; });
+  data.forEach(v=>{ const d=new Date((v.dateISO||todayMsk())+'T12:00:00'); const k=`${d.getFullYear()}-${String(d.getMonth()).padStart(2,'0')}`; if(!m[k])m[k]={c:0,y:0,o:0,lbl:MONTHS[d.getMonth()]+' '+(d.getFullYear()%100)}; if(v.visitor==='client')m[k].c++; else if(v.visitor==='yandex')m[k].y++; else if(v.visitor==='our')m[k].o++; });
   const s=Object.entries(m).sort((a,b)=>a[0]>b[0]?1:-1);
   dc('chMonthly');
   charts['chMonthly']=new Chart(document.getElementById('chMonthly'),{type:'bar',data:{labels:s.map(([,v])=>v.lbl),datasets:[{label:'Клиент',data:s.map(([,v])=>v.c),backgroundColor:'rgba(46,204,113,.8)',borderRadius:2},{label:'Яндекс',data:s.map(([,v])=>v.y),backgroundColor:'rgba(255,107,53,.8)',borderRadius:2},{label:'Наш',data:s.map(([,v])=>v.o),backgroundColor:'rgba(61,155,233,.8)',borderRadius:2}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{x:{stacked:true,grid:{display:false},ticks:{font:{family:'Montserrat',size:10}}},y:{stacked:true,grid:{color:'#f0f0f0'},ticks:{font:{family:'Montserrat',size:10}},beginAtZero:true}}}});
@@ -852,7 +871,8 @@ function setPeriodW(d,el){ wPeriod=d; document.querySelectorAll('#tab-workers .p
 
 function renderWorkers(){
   const cutoff=new Date(Date.now()-wPeriod*864e5);
-  const visits=allVisits.filter(v=>new Date(v.ts||v.shiftTs||new Date())>=cutoff);
+  const cutoffISO=fmtMsk(new Date(mskNow().getTime()-wPeriod*864e5));
+  const visits=allVisits.filter(v=>v.dateISO>=cutoffISO);
   const wmap={};
   allShifts.filter(s=>new Date(s.shiftStart||new Date())>=cutoff).forEach(s=>{
     if(!wmap[s.worker]) wmap[s.worker]={visits:0,orders:0,issued:0,returned:0,day:0,night:0,c:0,y:0,o:0,shifts:0,shiftList:[]};
@@ -865,7 +885,7 @@ function renderWorkers(){
     w.visits++;
     const ords=v.ordersArr.filter(o=>o.id&&o.id!=='__other__');
     w.orders+=ords.length;
-    if(['issue','pickup'].includes(v.operation)) w.issued+=ords.length;
+    if(['issue','pickup','both'].includes(v.operation)) w.issued+=ords.length;
     if(['return','dropoff','both'].includes(v.operation)) w.returned+=ords.length;
     if(!v.isNight)w.day++; else w.night++;
     if(v.visitor==='client')w.c++; else if(v.visitor==='yandex')w.y++; else if(v.visitor==='our')w.o++;
@@ -995,7 +1015,7 @@ function exportTimesheet(){
     const tE=s.shiftEnd  ?new Date(s.shiftEnd).toLocaleString('ru',{timeZone:'Europe/Moscow'}):'';
     return [s.worker,s.shiftDate||'',tS,tE,h.total,h.night,Math.round((h.total-h.night)*10)/10,s.isNight||''];
   });
-  const csv=[['Кладовщик','Дата смены','Начало (МСК)','Конец (МСК)','Всего часов','Ночных часов','Дневных часов','День/Ночь'],...rows].map(r=>r.join(';')).join('\n');
+  const csv=[['Кладовщик','Дата смены','Начало (МСК)','Конец (МСК)','Всего часов','Ночных часов','Дневных часов','День/Ночь'],...rows].map(r=>r.map(csvEsc).join(';')).join('\n');
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'}));
   a.download=`табель_${new Date().toISOString().split('T')[0]}.csv`; a.click();
@@ -1007,14 +1027,13 @@ function exportTimesheet(){
 function setPeriodL(d,el){ logPeriod=d; document.querySelectorAll('#tab-log .pbtn').forEach(b=>b.classList.remove('active')); el.classList.add('active'); renderLog(); }
 
 function renderLog(){
-  const cutoff=new Date(Date.now()-logPeriod*864e5);
-  const visits=[...allVisits].filter(v=>new Date(v.ts||v.shiftTs||new Date())>=cutoff)
-    .sort((a,b)=>(b.ts||b.shiftTs||'')>(a.ts||a.shiftTs||'')?1:-1).slice(0,300);
+  const cutoffISO=fmtMsk(new Date(mskNow().getTime()-logPeriod*864e5));
+  const visits=[...allVisits].filter(v=>v.dateISO>=cutoffISO)
+    .sort((a,b)=>((b.dateISO||'')+(b.time||''))>((a.dateISO||'')+(a.time||''))?1:-1).slice(0,300);
   const tbody=document.getElementById('logTbody');
   if(!visits.length){ tbody.innerHTML='<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--light)">Нет записей</td></tr>'; return; }
   tbody.innerHTML=visits.map(v=>{
-    const d=new Date(v.ts||v.shiftTs||new Date());
-    const dStr=d.toLocaleDateString('ru',{day:'numeric',month:'short',timeZone:'Europe/Moscow'});
+    const dStr=new Date((v.dateISO||todayMsk())+'T12:00:00').toLocaleDateString('ru',{day:'numeric',month:'short'});
     const ords=v.ordersArr.filter(o=>o.id&&o.id!=='__other__'&&o.id!=='(нет в списке)');
     const hasOther=v.ordersArr.some(o=>o.id==='__other__'||o.id==='(нет в списке)');
     const ordHtml=ords.length
@@ -1037,19 +1056,22 @@ function renderLog(){
   }).join('');
 }
 
+// Экранирование значения для CSV (— ; кавычки и переводы строк в комментариях)
+function csvEsc(v){ const s=String(v??''); return /[";\n\r]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s; }
+
 function exportCSV(){
-  const cutoff=new Date(Date.now()-logPeriod*864e5);
-  const visits=allVisits.filter(v=>new Date(v.ts||v.shiftTs||new Date())>=cutoff);
+  const cutoffISO=fmtMsk(new Date(mskNow().getTime()-logPeriod*864e5));
+  const visits=allVisits.filter(v=>v.dateISO>=cutoffISO);
   const rows=visits.flatMap(v=>{
     const ords=v.ordersArr.filter(o=>o.id&&o.id!=='__other__'&&o.id!=='(нет в списке)');
     const hasOtherCSV=v.ordersArr.some(o=>o.id==='__other__'||o.id==='(нет в списке)');
-    const baseRow=[new Date(v.ts||v.shiftTs||new Date()).toLocaleDateString('ru',{timeZone:'Europe/Moscow'}),v.time||'',v.isNight?'Ночь':'День',v.worker||'',VIS[v.visitor]||v.visitor||'',OPL[v.operation]||v.operation||''];
+    const baseRow=[new Date((v.dateISO||todayMsk())+'T12:00:00').toLocaleDateString('ru'),v.time||'',v.isNight?'Ночь':'День',v.worker||'',VIS[v.visitor]||v.visitor||'',OPL[v.operation]||v.operation||''];
     const rows2=ords.map(o=>[...baseRow,o.id,o.client||'',o.returnDate||'',v.comment||'']);
     if(hasOtherCSV) rows2.push([...baseRow,'(нет в списке)','','',v.comment||'']);
     if(!rows2.length) rows2.push([...baseRow,'','','',v.comment||'']);
     return rows2;
   });
-  const csv=[['Дата','Время визита (МСК)','Сутки','Кладовщик','Кто','Операция','Заказ','Клиент','Дата возврата','Комментарий'],...rows].map(r=>r.join(';')).join('\n');
+  const csv=[['Дата','Время визита (МСК)','Сутки','Кладовщик','Кто','Операция','Заказ','Клиент','Дата возврата','Комментарий'],...rows].map(r=>r.map(csvEsc).join(';')).join('\n');
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'}));
   a.download=`журнал_${new Date().toISOString().split('T')[0]}.csv`; a.click();
@@ -1183,9 +1205,11 @@ async function confirmLink(){
   const btn=document.getElementById('linkConfirmBtn');
   btn.textContent='Отправка...'; btn.disabled=true;
   try{
+    // text/plain вместо application/json: JSON триггерит CORS preflight (OPTIONS),
+    // который Apps Script не поддерживает. Бэкенд всё равно парсит e.postData.contents.
     const r=await fetch(SCRIPT_URL,{
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:{'Content-Type':'text/plain;charset=utf-8'},
       body:JSON.stringify({action:'linkVisit',visitKey:currentLinkVisit.visitKey,orderIds:[...selectedOrderIds]})
     });
     const j=await r.json();
