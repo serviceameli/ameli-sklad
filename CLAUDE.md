@@ -17,10 +17,11 @@
 | `config.js` | URL Apps Script — менять **только здесь** |
 | `google-apps-script.js` | Бэкенд на Google Apps Script |
 
-**Apps Script URL (актуальный):**
+**Apps Script URL (актуальный, деплой 11.06.2026):**
 ```
-https://script.google.com/macros/s/AKfycbyPYjJR41JlFRkL14-npAan7uHyYO5fumUwte7pAVV9WzTLoqu1hC5i1Gdr5wRmbhk/exec
+https://script.google.com/macros/s/AKfycbx4WLLgYRh4Nofp2xFS5XE85FUyxBucghTIA3pC2tK98tu8KJeOnJrJmLsjfvrzEHM/exec
 ```
+Единственный источник истины — `config.js`; этот блок просто дублирует его для справки.
 
 ⚠️ После каждого изменения Apps Script → **новое развёртывание** (New deployment) → новый URL → обновить `config.js`.
 
