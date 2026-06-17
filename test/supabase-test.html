@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Проверка Supabase — Ameli Склад</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; max-width: 720px; margin: 24px auto; padding: 0 16px; background:#111; color:#eee; }
+  h1 { font-size: 20px; }
+  button { background:#F5C518; color:#111; border:0; padding:12px 20px; font-size:16px; border-radius:10px; font-weight:700; cursor:pointer; }
+  .row { padding:10px 12px; border-radius:8px; margin:8px 0; background:#1c1c1c; display:flex; gap:10px; align-items:flex-start; }
+  .ok { color:#4ade80; } .fail { color:#f87171; } .wait { color:#fbbf24; }
+  .ico { font-size:18px; line-height:1.4; }
+  .name { font-weight:600; }
+  .detail { color:#999; font-size:13px; white-space:pre-wrap; word-break:break-word; }
+  pre { background:#000; padding:12px; border-radius:8px; overflow:auto; font-size:12px; }
+</style>
+</head>
+<body>
+  <h1>🔌 Проверка соединения с Supabase</h1>
+  <p class="detail">Проверяет: ключ, наличие таблиц/вьюхи, гранты, а также реальную запись → чтение → удаление визита. Тестовые данные удаляются автоматически.</p>
+  <button id="run">Запустить проверку</button>
+  <div id="out"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../config.js"></script>
+  <script>
+    const out = document.getElementById('out');
+    function line(name) {
+      const el = document.createElement('div');
+      el.className = 'row';
+      el.innerHTML = `<span class="ico wait">⏳</span><div><div class="name">${name}</div><div class="detail">…</div></div>`;
+      out.appendChild(el);
+      return {
+        ok:   (msg) => { el.querySelector('.ico').className='ico ok';   el.querySelector('.ico').textContent='✅'; el.querySelector('.detail').textContent = msg||'OK'; },
+        fail: (msg) => { el.querySelector('.ico').className='ico fail'; el.querySelector('.ico').textContent='❌'; el.querySelector('.detail').textContent = msg||'Ошибка'; }
+      };
+    }
+
+    document.getElementById('run').onclick = async () => {
+      out.innerHTML = '';
+
+      // 0. Конфиг
+      const lCfg = line('Конфиг (URL + ключ)');
+      if (typeof SUPABASE_URL === 'undefined' || typeof SUPABASE_KEY === 'undefined' || !SUPABASE_URL || !SUPABASE_KEY) {
+        lCfg.fail('Не найдены SUPABASE_URL / SUPABASE_KEY в config.js');
+        return;
+      }
+      lCfg.ok(SUPABASE_URL);
+
+      const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+      // 1. Чтение таблиц
+      for (const t of ['orders','workers','shifts','visits','visit_orders','drafts']) {
+        const l = line(`Таблица «${t}» — чтение`);
+        const { data, error, count } = await sb.from(t).select('*', { count:'exact', head:true });
+        if (error) l.fail(error.message + (error.hint ? '\nhint: '+error.hint : ''));
+        else l.ok(`OK, строк: ${count ?? 0}`);
+      }
+
+      // 2. Вьюха статусов
+      {
+        const l = line('Вьюха «order_status» — чтение');
+        const { error } = await sb.from('order_status').select('order_no').limit(1);
+        if (error) l.fail(error.message); else l.ok('OK');
+      }
+
+      // 3. Запись → чтение → удаление (полный цикл)
+      const lW = line('Запись визита (insert)');
+      let visitId = null;
+      {
+        const { data, error } = await sb.from('visits').insert({
+          worker:'__ТЕСТ__', visitor:'client', operation:'issue',
+          visit_date:'2026-01-01', visit_time:'12:00', is_night:false, comment:'smoke-test'
+        }).select().single();
+        if (error) { lW.fail(error.message); }
+        else { visitId = data.id; lW.ok('id: '+visitId); }
+      }
+
+      if (visitId) {
+        const lL = line('Связанный заказ (insert visit_orders + каскад)');
+        const { error: e1 } = await sb.from('visit_orders').insert({ visit_id: visitId, order_no:'__ТЕСТ-ЗАКАЗ__' });
+        if (e1) lL.fail(e1.message);
+        else {
+          // удаляем визит — visit_orders должен удалиться каскадом
+          const { error: e2 } = await sb.from('visits').delete().eq('id', visitId);
+          if (e2) { lL.fail('Визит не удалился: '+e2.message); }
+          else {
+            const { count } = await sb.from('visit_orders').select('*', { count:'exact', head:true }).eq('visit_id', visitId);
+            if ((count ?? 0) === 0) lL.ok('Каскадное удаление работает ✓');
+            else lL.fail('Остались сироты visit_orders: '+count);
+          }
+        }
+      }
+
+      const done = line('Итог');
+      const fails = out.querySelectorAll('.ico.fail').length;
+      if (fails === 0) done.ok('Всё работает. Можно делать боевой слой.');
+      else done.fail(`Есть ошибки: ${fails}. Скинь мне текст красных строк.`);
+    };
+  </script>
+</body>
+</html>
