@@ -125,6 +125,14 @@ table.dt tbody tr:last-child td{border-bottom:none}
 
 /* ── EXPORT BTN ── */
 .exp-btn{background:var(--black);color:#fff;border:none;border-radius:9px;padding:8px 16px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:600;cursor:pointer;display:inline-block;margin-bottom:12px}
+
+/* ── DELETE ORDER BTN ── */
+.del-order-btn{background:none;border:none;color:var(--muted);font-size:14px;cursor:pointer;padding:2px 6px;border-radius:5px;line-height:1;opacity:.5;transition:opacity .15s,color .15s}
+.del-order-btn:hover{opacity:1;color:#c0392b}
+/* ── SYNC BTN ── */
+.sync-btn{background:none;border:1px solid var(--rule);border-radius:8px;padding:6px 12px;font-family:'Montserrat',sans-serif;font-size:11px;font-weight:600;color:var(--mid);cursor:pointer;transition:all .15s;margin-left:8px}
+.sync-btn:hover{border-color:var(--accent);color:var(--accent)}
+.sync-btn:disabled{opacity:.5;cursor:default}
 .exp-btn:hover{background:#333}
 
 /* ── INSIGHT CARD ── */
@@ -207,7 +215,10 @@ table.dt tbody tr:last-child td{border-bottom:none}
       <div style="font-size:18px;font-weight:700;color:var(--black)">Заказы на сегодня</div>
       <div style="font-size:11px;color:var(--muted);margin-top:2px" id="todayDateLbl">—</div>
     </div>
-    <button class="rfbtn" onclick="loadData()">↻ Обновить</button>
+    <div style="display:flex;align-items:center;gap:0">
+      <button class="rfbtn" onclick="loadData()">↻ Обновить</button>
+      <button class="sync-btn" id="syncBtn" onclick="syncOrdersUI()">⟳ Синхронизировать заказы</button>
+    </div>
   </div>
   <!-- summary mini -->
   <div class="sg sg-4" id="ordersSummary"></div>
@@ -631,6 +642,7 @@ function renderOrders(){
       : `<span class="badge" style="background:rgba(61,155,233,.15);color:#1a6fa0">🔄 Ожидает</span>`;
     const timeInfo = o.issueTime||o.returnTime ? `<br><span style="font-size:10px;color:var(--muted)">${o.issueTime||o.returnTime}</span>` : '';
     const commentHtml = commentMap[o.id] ? `<br><span style="font-size:10px;color:var(--muted);font-style:italic">💬 ${commentMap[o.id]}</span>` : '';
+    const delBtn = `<button class="del-order-btn" onclick="deleteOrderUI('${o.id.replace(/'/g,"\\'")}','${(o.client||'').replace(/'/g,"\\'")}')">🗑</button>`;
     return {done, html:`<tr>
       <td>${statusBadge}</td>
       <td><span class="onum">${o.id}</span></td>
@@ -638,6 +650,7 @@ function renderOrders(){
       <td style="font-family:'JetBrains Mono',monospace;font-size:11px">${dateRange}${timeInfo}</td>
       <td>${delivBadge}</td>
       <td>${o.worker?`<span style="font-size:11px;font-weight:600;color:var(--mid)">${o.worker}</span>`:'—'}</td>
+      <td>${delBtn}</td>
     </tr>`};
   };
 
@@ -648,7 +661,7 @@ function renderOrders(){
     const done    = rows.filter(r=>r.done);
     let html = `<div class="orders-section-lbl">${title} (${orders.length})</div>
     <table class="dt"><thead><tr>
-      <th>Статус</th><th>Заказ</th><th>Клиент</th><th>Даты аренды</th><th>Доставка</th><th>Работник</th>
+      <th>Статус</th><th>Заказ</th><th>Клиент</th><th>Даты аренды</th><th>Доставка</th><th>Работник</th><th></th>
     </tr></thead><tbody>`;
     pending.forEach(r=>html+=r.html);
     if(done.length){
@@ -1262,6 +1275,50 @@ function genDemoShifts(){
     shifts.push({worker:w,shiftDate:date.toLocaleDateString('ru'),shiftStart:shiftStart.toISOString(),shiftEnd:shiftEnd.toISOString(),isNight:isNight?'Ночь':'День',totalEntries:n,entries});
   }
   return shifts;
+}
+
+// ══════════════════════════════════════════
+// DELETE ORDER
+// ══════════════════════════════════════════
+async function deleteOrderUI(orderId, client) {
+  if (!confirm(`Удалить заказ ${orderId} (${client || '—'}) из базы?\n\nЗаказ исчезнет из списков. Визиты в журнале останутся.`)) return;
+  try {
+    await WHApi.deleteOrder(orderId);
+    todayOrders = todayOrders.filter(o => o.id !== orderId);
+    renderOrders();
+    showToast(`Заказ ${orderId} удалён`);
+  } catch(e) {
+    alert('Ошибка удаления: ' + e.message);
+  }
+}
+
+// ══════════════════════════════════════════
+// SYNC ORDERS
+// ══════════════════════════════════════════
+async function syncOrdersUI() {
+  const btn = document.getElementById('syncBtn');
+  btn.disabled = true;
+  btn.textContent = '⟳ Синхронизация...';
+  try {
+    const j = await WHApi.syncOrders();
+    const added = j.added ?? j.upserted ?? '?';
+    showToast(`Синхронизировано: ${added} заказов обновлено`);
+    await loadData();
+  } catch(e) {
+    alert('Ошибка синхронизации: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '⟳ Синхронизировать заказы';
+  }
+}
+
+function showToast(msg) {
+  const t = document.createElement('div');
+  t.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--black);color:#fff;padding:10px 20px;border-radius:10px;font-size:13px;font-weight:600;z-index:9999;pointer-events:none;opacity:0;transition:opacity .2s';
+  t.textContent = msg;
+  document.body.appendChild(t);
+  requestAnimationFrame(() => { t.style.opacity = '1'; });
+  setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 250); }, 2500);
 }
 </script>
 </body>

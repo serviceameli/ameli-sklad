@@ -353,5 +353,21 @@
     return { success: true, linked: orderIds.length };
   }
 
-  global.WHApi = { getAll, getData, getUnmatched, linkVisit, addVisit, deleteVisit, saveDraft, clearDraft, closeShift };
+  // Удалить заказ из таблицы orders
+  async function deleteOrder(orderId) {
+    const sb = client();
+    const res = await sb.from('orders').delete().eq('order_no', orderId);
+    if (res.error) throw res.error;
+    return { success: true };
+  }
+
+  // Принудительная синхронизация Google Sheets → Supabase (через Apps Script)
+  async function syncOrders() {
+    if (typeof SYNC_URL === 'undefined' || !SYNC_URL) throw new Error('SYNC_URL не задан');
+    const res = await fetch(SYNC_URL + '?action=syncOrders');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return res.json();
+  }
+
+  global.WHApi = { getAll, getData, getUnmatched, linkVisit, addVisit, deleteVisit, saveDraft, clearDraft, closeShift, deleteOrder, syncOrders };
 })(window);
