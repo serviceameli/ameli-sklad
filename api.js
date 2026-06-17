@@ -389,5 +389,54 @@
     return res.json();
   }
 
-  global.WHApi = { getAll, getData, getUnmatched, linkVisit, addVisit, deleteVisit, saveDraft, clearDraft, closeShift, deleteOrder, syncOrders };
+  // Список всех кладовщиков (включая архивных) для управления
+  async function getWorkers() {
+    const { data, error } = await client().from('workers').select('name,active').order('name');
+    if (error) throw error;
+    return data || [];
+  }
+
+  // Добавить кладовщика
+  async function addWorker(name) {
+    const { error } = await client().from('workers').insert({ name: name.trim(), active: true });
+    if (error) throw error;
+    return { success: true };
+  }
+
+  // Перевести кладовщика в архив (active=false) или восстановить (active=true)
+  async function setWorkerActive(name, active) {
+    const { error } = await client().from('workers').update({ active }).eq('name', name);
+    if (error) throw error;
+    return { success: true };
+  }
+
+  // История смен конкретного кладовщика с вложенными визитами
+  async function getWorkerHistory(workerName) {
+    const sb = client();
+    const [sh, vi, vo] = await Promise.all([
+      sb.from('shifts').select('*').eq('worker', workerName).order('start_at', { ascending: false }),
+      sb.from('visits').select('*').eq('worker', workerName),
+      sb.from('visit_orders').select('*')
+    ]);
+    const shifts = sh.data || [], visits = vi.data || [], vorders = vo.data || [];
+    const voByVisit = {};
+    vorders.forEach(o => { (voByVisit[o.visit_id] = voByVisit[o.visit_id] || []).push(o); });
+    const visByShift = {};
+    visits.forEach(v => { (visByShift[v.shift_id] = visByShift[v.shift_id] || []).push(v); });
+    return shifts.map(s => ({
+      id: s.id, shiftDate: s.shift_date, shiftStart: s.start_at, shiftEnd: s.end_at,
+      isNight: s.is_night ? 'Ночь' : 'День',
+      entries: (visByShift[s.id] || []).map(v => ({
+        visitor: v.visitor, operation: v.operation,
+        time: fmtVisitTime(v.visit_time), date: v.visit_date,
+        comment: v.comment || '', isOther: !!v.is_other,
+        orders: (voByVisit[v.id] || []).filter(o => o.order_no).map(o => ({
+          id: o.order_no, client: o.client_snapshot || '',
+          returnDate: o.return_date_snapshot || '', delivery: o.delivery_snapshot || ''
+        }))
+      }))
+    }));
+  }
+
+  global.WHApi = { getAll, getData, getUnmatched, linkVisit, addVisit, deleteVisit, saveDraft, clearDraft, closeShift, deleteOrder, syncOrders, getWorkers, addWorker, setWorkerActive, getWorkerHistory };
 })(window);
