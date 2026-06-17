@@ -1202,18 +1202,10 @@ async function confirmLink(){
   const btn=document.getElementById('linkConfirmBtn');
   btn.textContent='Отправка...'; btn.disabled=true;
   try{
-    // text/plain вместо application/json: JSON триггерит CORS preflight (OPTIONS),
-    // который Apps Script не поддерживает. Бэкенд всё равно парсит e.postData.contents.
-    const r=await fetch(SCRIPT_URL,{
-      method:'POST',
-      headers:{'Content-Type':'text/plain;charset=utf-8'},
-      body:JSON.stringify({action:'linkVisit',visitKey:currentLinkVisit.visitKey,orderIds:[...selectedOrderIds]})
-    });
-    const j=await r.json();
+    const j=await WHApi.linkVisit({visitKey:currentLinkVisit.visitKey,orderIds:[...selectedOrderIds]});
     if(j.success){
       closeLinkModal();
       await loadUnmatched();
-      // Show success
       document.getElementById('linkContent').insertAdjacentHTML('afterbegin',
         `<div style="background:rgba(46,204,113,.1);border:1px solid var(--client);border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:13px;font-weight:600;color:#1a8a4a">✓ Связано успешно! Привязано заказов: ${j.linked}</div>`);
     } else {

@@ -265,10 +265,93 @@
     ]);
   }
 
-  // Заглушка под вкладку «Сверка» — реализуем позже
+  // Сверка: визиты is_other за 7 дней + заказы без записи в логе
   async function getUnmatched() {
-    return { unmatchedVisits: [], unlistedOrders: [] };
+    const sb = client();
+    const today = mskToday();
+    const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+
+    const [vi, vo, sh, ord, st] = await Promise.all([
+      sb.from('visits').select('*').eq('is_other', true).gte('visit_date', sevenDaysAgo),
+      sb.from('visit_orders').select('*'),
+      sb.from('shifts').select('*'),
+      sb.from('orders').select('*'),
+      sb.from('order_status').select('*')
+    ]);
+
+    const visits = vi.data || [], vorders = vo.data || [], shifts = sh.data || [];
+    const orders = ord.data || [], statuses = st.data || [];
+
+    const shiftById = {};
+    shifts.forEach(s => { shiftById[s.id] = s; });
+
+    const voByVisit = {};
+    vorders.forEach(o => { (voByVisit[o.visit_id] = voByVisit[o.visit_id] || []).push(o); });
+
+    const unmatchedVisits = visits.map(v => {
+      const s = shiftById[v.shift_id] || {};
+      const linkedOrders = (voByVisit[v.id] || []).filter(o => o.order_no).map(o => ({ id: o.order_no }));
+      return {
+        visitKey: v.id,
+        shiftDate: s.shift_date || v.visit_date || '',
+        time: v.visit_time || '',
+        worker: v.worker || s.worker || '',
+        isNight: v.is_night ? 'Ночь' : 'День',
+        visitor: v.visitor || '',
+        operation: v.operation || '',
+        comment: v.comment || '',
+        orders: linkedOrders
+      };
+    });
+
+    const issuedSet = new Set(), returnedSet = new Set();
+    statuses.forEach(r => {
+      if (r.issued) issuedSet.add(r.order_no);
+      if (r.returned) returnedSet.add(r.order_no);
+    });
+
+    const unlistedOrders = orders.filter(o => {
+      const iss = o.issue_date || '', ret = o.return_date || '';
+      const inRange = (iss >= sevenDaysAgo && iss <= today) || (ret >= sevenDaysAgo && ret <= today);
+      return inRange && !issuedSet.has(o.order_no) && !returnedSet.has(o.order_no);
+    }).map(o => ({
+      id: o.order_no, client: o.client || '',
+      issueDate: ddmmyyyy(o.issue_date), returnDate: ddmmyyyy(o.return_date)
+    }));
+
+    return { unmatchedVisits, unlistedOrders };
   }
 
-  global.WHApi = { getAll, getData, getUnmatched, addVisit, deleteVisit, saveDraft, clearDraft, closeShift };
+  // Привязать визит «нет в списке» к заказам
+  async function linkVisit(payload) {
+    const sb = client();
+    const { visitKey, orderIds } = payload;
+    if (!visitKey || !orderIds || !orderIds.length) return { success: false, error: 'no data' };
+
+    const vis = await sb.from('visits').select('id,shift_id').eq('id', visitKey).maybeSingle();
+    if (!vis.data) return { success: false, error: 'visit not found' };
+
+    const ordRows = await sb.from('orders').select('order_no,client,return_date,delivery_worker')
+      .in('order_no', orderIds);
+    const ordMap = {};
+    (ordRows.data || []).forEach(o => { ordMap[o.order_no] = o; });
+
+    const toInsert = orderIds.map(id => ({
+      visit_id: visitKey,
+      order_no: id,
+      client_snapshot: ordMap[id]?.client || '',
+      return_date_snapshot: ordMap[id]?.return_date || null,
+      delivery_snapshot: ordMap[id]?.delivery_worker ? 'Наша доставка' : 'Самовывоз'
+    }));
+
+    const ins = await sb.from('visit_orders').insert(toInsert);
+    if (ins.error) return { success: false, error: ins.error.message };
+
+    // Обновить флаг is_other → false (визит теперь привязан)
+    await sb.from('visits').update({ is_other: false }).eq('id', visitKey);
+
+    return { success: true, linked: orderIds.length };
+  }
+
+  global.WHApi = { getAll, getData, getUnmatched, linkVisit, addVisit, deleteVisit, saveDraft, clearDraft, closeShift };
 })(window);

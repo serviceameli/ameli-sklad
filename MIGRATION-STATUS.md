@@ -28,17 +28,31 @@
 
 Тестовый дашборд `https://serviceameli.github.io/ameli-sklad/test/warehouse-dashboard.html` — все вкладки живые: Заказы сегодня, Статистика (134 визита / 125 заказов / 6 кладовщиков), Кладовщики с карточками.
 
+## ✅ Страница кладовщика — тестовый дубль (17 июня 2026, сессия 3)
+
+- **workers** перенесены в Supabase (7 кладовщиков).
+- **api.js** расширен write-методами: `getData`, `addVisit`, `deleteVisit`, `saveDraft`, `clearDraft`, `closeShift`.
+- **`test/warehouse-staff.html`** создан — копия боевой страницы, все `fetch(SCRIPT_URL)` заменены на `WHApi.*`.
+- Проверено в браузере: welcome-экран, загрузка заказов из Supabase, открытие смены, `addVisit` записывает в БД (визит появился, счётчик обновился), удаление работает.
+
+Публичный URL: `https://serviceameli.github.io/ameli-sklad/test/warehouse-staff.html?worker=Имя+Фамилия`
+
+## ✅ Боевые страницы переключены на Supabase (17 июня 2026, сессия 4)
+
+- **`api.js`**: реализованы `getUnmatched` и `linkVisit` (вкладка «Сверка» дашборда полностью на Supabase).
+- **`warehouse-dashboard.html`**: `confirmLink` переведён с прямого `fetch(SCRIPT_URL)` на `WHApi.linkVisit`.
+- **`config.js`**: `SCRIPT_URL = 'YOUR_SCRIPT_URL'` — боевые страницы теперь читают/пишут через `api.js` → Supabase.
+- Проверено локально: дашборд показывает реальные заказы, страница кладовщика загружает данные.
+
 ## Следующий шаг
 
-## Мелкие хвосты
-- Перенести `workers` (лист `workers` → таблица `workers` в Supabase) — нужно для страницы кладовщика.
-- Кэш браузера на `config.js`: если дубль показывает нули — жёсткое обновление Cmd+Shift+R.
+**Миграция завершена.** Оба инстанса (кладовщик + дашборд) работают на Supabase. Опциональные доработки:
+- Убрать `test/` папку с дублями страниц (теперь боевые = тестовые).
+- Убрать Apps Script логику `google-apps-script.js` или оставить как архив.
+- Настроить автосинхронизацию заказов (Apps Script `syncOrdersOnce` → триггер раз в день).
 
-## Дальнейшие шаги по плану (после истории)
-- Перенести `workers` (лист → таблица `workers`) — нужно для страницы кладовщика.
-- Собрать дубль страницы кладовщика `test/warehouse-staff.html` на `api.js` (чтение + запись визитов/смен/черновиков в Supabase).
-- Реализовать запись в `api.js` (addVisit/closeShift/saveDraft/deleteVisit/linkVisit) и `getUnmatched`.
-- Сверка → бесшовное переключение боевых страниц (флаг бэкенда) → чистка.
+## Мелкие хвосты
+- Кэш браузера: если страница показывает старые данные — Cmd+Shift+R.
 
 ## Файлы проекта (новые)
 `migration-plan-supabase.md`, `api.js`, `config.js` (обновлён), `supabase/supabase-schema.sql`, `supabase/rls-policies.sql`, `supabase/apps-script-sync.js`, `supabase/apps-script-sync-quick.js`, `test/supabase-test.html`, `test/warehouse-dashboard.html`.
