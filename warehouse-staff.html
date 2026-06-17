@@ -679,8 +679,9 @@ async function init(){
     }
   }
 
-  // Нет личной ссылки (или имя не найдено) → режим просмотра
-  enterViewOnly();
+  // Нет личной ссылки → экран выбора кладовщика
+  // Имя из ?worker= есть, но не найдено в базе → тоже выбор (возможно, опечатка в ссылке)
+  showScreen('s-worker');
 }
 
 // ── WELCOME ──
@@ -831,13 +832,7 @@ function showToast(msg, color){
 
 // ── LOAD ──
 async function loadData(workerParam){
-  if(SCRIPT_URL.includes('YOUR_')){
-    workers=[]; // имена берутся только из Google Sheets
-    orders=demoOrders();
-    return null;
-  }
   try{
-    const wp = workerParam ? '&worker='+encodeURIComponent(workerParam) : '';
     const j=await WHApi.getData(workerParam);
     workers=j.workers||[]; orders=j.orders||[];
     serverIssuedToday   = new Set(j.processedOrders?.issued   || []);
@@ -869,9 +864,7 @@ function saveDraft(){
   if(!worker) return;
   const draft={worker,shiftStart:shiftStart?.toISOString()||null,visits,isNight:isNight()?'Ночь':'День',savedAt:new Date().toISOString()};
   localStorage.setItem(draftKey(),JSON.stringify(draft));
-  if(!SCRIPT_URL.includes('YOUR_')){
-    WHApi.saveDraft({...draft,isDraft:true,shiftDate:new Date().toLocaleDateString('ru'),totalEntries:visits.length,entries:visits}).catch(()=>{});
-  }
+  WHApi.saveDraft({...draft,isDraft:true,shiftDate:new Date().toLocaleDateString('ru'),totalEntries:visits.length,entries:visits}).catch(()=>{});
 }
 function startAutosave(){ stopAutosave(); autosaveTimer=setInterval(saveDraft,AUTOSAVE_INT); }
 function stopAutosave(){ if(autosaveTimer){clearInterval(autosaveTimer);autosaveTimer=null;} }
@@ -1182,7 +1175,6 @@ function applyRecentDeletions(){
 }
 
 async function refreshOrdersFromServer(){
-  if(SCRIPT_URL.includes('YOUR_')) return;
   try{
     const j=await WHApi.getData(null);
     if(j.orders){
@@ -1428,7 +1420,6 @@ function addVisit(){
 
 // Немедленная отправка визита в Google Sheets (не ждёт закрытия смены)
 function sendVisitNow(visit){
-  if(SCRIPT_URL.includes('YOUR_')) return;
   const entry={
     visitor:visit.visitor, operation:visit.operation,
     orders:visit.orders||[], orderId:visit.orderId||'', orderClient:visit.orderClient||'',
@@ -1570,7 +1561,7 @@ function delVisit(i){
   }
 
   // Отправляем удаление на сервер (fire-and-forget)
-  if(!SCRIPT_URL.includes('YOUR_') && shiftStart){
+  if(shiftStart){
     WHApi.deleteVisit({shiftStart:shiftStart.toISOString(),worker,timeAuto:visit.timeAuto||''}).catch(()=>{});
   }
 
@@ -1771,9 +1762,7 @@ async function confirmSubmit(){
   if(s.length>20) s.splice(0, s.length-20); // не даём localStorage расти бесконечно
   localStorage.setItem('wh_shifts',JSON.stringify(s));
   localStorage.removeItem(draftKey());
-  if(!SCRIPT_URL.includes('YOUR_')){
-    try{await WHApi.closeShift(payload)}catch(e){console.error('closeShift failed',e)}
-  }
+  try{await WHApi.closeShift(payload)}catch(e){console.error('closeShift failed',e)}
   showSuccess(payload);
 }
 

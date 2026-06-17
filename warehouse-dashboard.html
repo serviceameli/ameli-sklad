@@ -477,17 +477,12 @@ function fmt(d){ return d instanceof Date ? d.toISOString().split('T')[0] : d; }
 async function loadData(){
   if(document.getElementById('rfts')) document.getElementById('rfts').textContent='Загрузка...';
   const local = JSON.parse(localStorage.getItem('wh_shifts')||'[]');
-  if(SCRIPT_URL.includes('YOUR_')){
-    allShifts  = local.length ? local : genDemoShifts();
-    todayOrders= genDemoOrders();
-  } else {
-    try{
-      const j=await WHApi.getAll();
-      allShifts  = j.shifts||local;
-      todayOrders= j.orders||[];
-      if(j.processedOrders) serverProcessed={issued:j.processedOrders.issued||[],returned:j.processedOrders.returned||[],otherVisits:j.processedOrders.otherVisits||[]};
-    }catch(e){ allShifts=local; todayOrders=[]; }
-  }
+  try{
+    const j=await WHApi.getAll();
+    allShifts  = j.shifts||local;
+    todayOrders= j.orders||[];
+    if(j.processedOrders) serverProcessed={issued:j.processedOrders.issued||[],returned:j.processedOrders.returned||[],otherVisits:j.processedOrders.otherVisits||[]};
+  }catch(e){ allShifts=local; todayOrders=[]; }
 
   // Flatten: one record per VISIT (with all orders inside)
   allVisits=[];
@@ -522,10 +517,7 @@ async function loadData(){
     document.getElementById('rfts').textContent='Обновлено '+new Date().toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit',timeZone:'Europe/Moscow'})+' МСК';
 
   renderAll();
-  // Check for unmatched visits and show notification
-  if(!SCRIPT_URL.includes('YOUR_')){
-    WHApi.getUnmatched().then(j=>{ unmatchedData=j; updateLinkBadge(); }).catch(()=>{});
-  }
+  WHApi.getUnmatched().then(j=>{ unmatchedData=j; updateLinkBadge(); }).catch(()=>{});
 }
 
 function renderAll(){
@@ -1102,11 +1094,6 @@ let selectedOrderIds = new Set();
 
 async function loadUnmatched(){
   document.getElementById('linkContent').innerHTML=`<div style="text-align:center;padding:40px;color:var(--light)"><div style="font-size:28px;margin-bottom:8px">⏳</div><div>Загрузка...</div></div>`;
-  if(SCRIPT_URL.includes('YOUR_')){
-    unmatchedData={unmatchedVisits:[],unlistedOrders:[]};
-    renderLinkTab();
-    return;
-  }
   try{
     unmatchedData=await WHApi.getUnmatched();
   }catch(e){ unmatchedData={unmatchedVisits:[],unlistedOrders:[]}; }
