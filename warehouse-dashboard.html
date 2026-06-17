@@ -484,7 +484,12 @@ function fmtMsk(d){ return d.toISOString().split('T')[0]; } // YYYY-MM-DD in MSK
 function todayMsk(){ return fmtMsk(mskNow()); }
 function parseMskHour(timeStr){
   if(!timeStr) return null;
-  const m=timeStr.match(/(\d{1,2})[:h]/);
+  const s=timeStr.toString();
+  // Excel-эпоха из Sheets — берём UTC-час (он уже содержит правильное время суток)
+  if(s.startsWith('1899-12-30T')||s.startsWith('1899-12-29T')){
+    return new Date(s).getUTCHours();
+  }
+  const m=s.match(/(\d{1,2})[:h]/);
   return m?parseInt(m[1]):null;
 }
 function isNightHour(h){ return h!=null && (h>=22 || h<9); }
@@ -851,7 +856,7 @@ function renderTimeline(data){
     nightA.push(vs.filter(v=>v.isNight).length);
     ordA.push(vs.reduce((s,v)=>s+v.ordersArr.filter(o=>o.id&&o.id!=='__other__').length,0));
   });
-  const fl=lbls.map(l=>new Date(l).toLocaleDateString('ru',{day:'numeric',month:'short'}));
+  const fl=lbls.map(l=>new Date(l+'T12:00:00').toLocaleDateString('ru',{day:'numeric',month:'short'}));
   dc('chTimeline');
   charts['chTimeline']=new Chart(document.getElementById('chTimeline'),{type:'bar',data:{labels:fl,datasets:[
     {label:'Визитов (день)',data:dayA,backgroundColor:'rgba(245,197,24,.75)',borderRadius:2,stack:'v'},
@@ -905,7 +910,8 @@ function renderWorkers(){
   const cutoffISO=fmtMsk(new Date(mskNow().getTime()-wPeriod*864e5));
   const visits=allVisits.filter(v=>v.dateISO>=cutoffISO);
   const wmap={};
-  allShifts.filter(s=>new Date(s.shiftStart||new Date())>=cutoff).forEach(s=>{
+  // Фикс: пропускаем смены без shiftStart (иначе fallback new Date() всегда >= cutoff)
+  allShifts.filter(s=>s.shiftStart && new Date(s.shiftStart)>=cutoff).forEach(s=>{
     if(!wmap[s.worker]) wmap[s.worker]={visits:0,orders:0,issued:0,returned:0,day:0,night:0,c:0,y:0,o:0,shifts:0,shiftList:[]};
     wmap[s.worker].shifts++;
     wmap[s.worker].shiftList.push(s);
@@ -953,8 +959,8 @@ function renderWorkers(){
         <div style="padding:9px 14px">
           <div style="font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--light);margin-bottom:6px">По заказам</div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
-            <span class="badge issued">↑ ${w.issued}</span>
-            <span class="badge returned">↓ ${w.returned}</span>
+            <span class="badge issued">📦 ${w.issued} выдач</span>
+            <span class="badge returned">🔄 ${w.returned} возвр.</span>
           </div>
         </div>
       </div>
@@ -994,28 +1000,81 @@ function calcShiftHours(s){
   return {total:Math.round(totalH*10)/10, night:Math.round(nightMs/3600000*10)/10};
 }
 
+// Форматирует дату смены из любого формата в читаемый вид с днём недели
+// Вход: "02.06.2026" | "2026-06-17" | "2026-06-17T21:00:00.000Z" | null
+function fmtShiftDate(shiftDate, shiftStart){
+  let d = null;
+  if(shiftDate){
+    const s = shiftDate.toString();
+    // dd.MM.yyyy → parse
+    if(/^\d{2}\.\d{2}\.\d{4}/.test(s)){
+      const [dd,mm,yyyy]=s.split('.');
+      d = new Date(`${yyyy}-${mm}-${dd}T12:00:00`);
+    } else if(/^\d{4}-\d{2}-\d{2}/.test(s)){
+      d = new Date(s.slice(0,10)+'T12:00:00');
+    }
+  }
+  if(!d && shiftStart) d = new Date(new Date(shiftStart).getTime()+MSK_OFFSET*3600000);
+  if(!d) return '—';
+  return d.toLocaleDateString('ru',{weekday:'short',day:'numeric',month:'long'});
+}
+
+// Парсит «сырое» время: "14:30" → "14:30", "1899-12-30T11:03:43.000Z" → "14:03" (UTC+3)
+function fmtRawTime(v){
+  if(!v||v==='—') return '—';
+  const s=v.toString();
+  // Excel-эпоха из Sheets: "1899-12-30T..."
+  if(s.startsWith('1899-12-30T')||s.startsWith('1899-12-29T')){
+    const d=new Date(s);
+    return d.toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit',timeZone:'UTC'});
+  }
+  // Нормальная строка "HH:MM"
+  const m=s.match(/(\d{1,2}):(\d{2})/);
+  return m?`${m[1].padStart(2,'0')}:${m[2]}`:'—';
+}
+
 function renderTimesheet(){
-  const cutoff=new Date(Date.now()-tsPeriod*864e5);
-  const shifts=allShifts.filter(s=>new Date(s.shiftStart||new Date())>=cutoff);
+  const cutoffISO=fmtMsk(new Date(mskNow().getTime()-tsPeriod*864e5));
+  // Фикс: пропускаем смены без shiftStart вместо fallback на new Date()
+  const shifts=allShifts.filter(s=>s.shiftStart && shiftDateToISO(s.shiftDate||'')>=cutoffISO);
   const wmap={};
   shifts.forEach(s=>{
-    if(!wmap[s.worker]) wmap[s.worker]={shifts:[],totalH:0,nightH:0};
+    if(!wmap[s.worker]) wmap[s.worker]={shifts:[],totalH:0,nightH:0,shiftCount:0};
     const h=calcShiftHours(s);
     wmap[s.worker].shifts.push({...s,hours:h.total,nightHours:h.night});
     wmap[s.worker].totalH+=h.total;
     wmap[s.worker].nightH+=h.night;
+    wmap[s.worker].shiftCount++;
   });
 
   const html=Object.entries(wmap).sort((a,b)=>b[1].totalH-a[1].totalH).map(([name,w])=>{
-    const rows=w.shifts.sort((a,b)=>b.shiftStart>a.shiftStart?1:-1).map(s=>{
-      const dStr=s.shiftDate||new Date(s.shiftStart).toLocaleDateString('ru',{day:'numeric',month:'short',timeZone:'Europe/Moscow'});
-      const tStart=s.shiftStart?new Date(s.shiftStart).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit',timeZone:'Europe/Moscow'}):'—';
-      const tEnd  =s.shiftEnd  ?new Date(s.shiftEnd).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit',timeZone:'Europe/Moscow'}):'—';
+    const rows=w.shifts.sort((a,b)=>new Date(b.shiftStart)-new Date(a.shiftStart)).map(s=>{
+      const dStr  = fmtShiftDate(s.shiftDate, s.shiftStart);
+      const tStart= s.shiftStart?new Date(s.shiftStart).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit',timeZone:'Europe/Moscow'}):'—';
+      const tEnd  = s.shiftEnd  ?new Date(s.shiftEnd).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit',timeZone:'Europe/Moscow'}):'в процессе';
+      const isOpen= !s.shiftEnd;
+      // Предупреждение: смена > 24ч явно некорректна
+      const isBogus = s.hours > 24;
+      const dayH  = Math.round((s.hours-s.nightHours)*10)/10;
+      // Суточный переход: если конец < начало по часам — смена через полночь
+      const startH = s.shiftStart?new Date(s.shiftStart).getUTCHours()+MSK_OFFSET:0;
+      const endH   = s.shiftEnd?new Date(s.shiftEnd).getUTCHours()+MSK_OFFSET:25;
+      const crossesMidnight = s.shiftEnd && (endH%24)<(startH%24);
+      const endLabel = isOpen
+        ? `<span style="color:var(--client);font-size:10px">● идёт</span>`
+        : (crossesMidnight ? `${tEnd} <span style="font-size:9px;color:var(--muted)">след.</span>` : tEnd);
+      if(isBogus) return `<div class="ts-row" style="background:rgba(231,76,60,.06)">
+        <span class="ts-date" style="color:#c0392b">⚠️ ${dStr} · ${tStart}→${tEnd}</span>
+        <span style="color:#c0392b;font-weight:700;font-size:11px">${s.hours}ч — некорр. данные</span>
+      </div>`;
       return `<div class="ts-row">
-        <span class="ts-date">${dStr} · ${tStart}–${tEnd}</span>
-        <span>
-          <span class="ts-hours">${s.hours}ч</span>
-          ${s.nightHours>0?`<span class="ts-night">🌙 ${s.nightHours}ч</span>`:''}
+        <div>
+          <div class="ts-date">${dStr}</div>
+          <div style="font-size:10px;color:var(--muted);margin-top:1px">${tStart} → ${endLabel}</div>
+        </div>
+        <span style="text-align:right">
+          <div class="ts-hours">${isOpen?'—':s.hours+'ч'}</div>
+          ${!isOpen&&s.hours>0?`<div style="font-size:10px;margin-top:1px;color:var(--muted)">☀️${dayH} · <span style="color:var(--night)">🌙${s.nightHours}</span></div>`:''}
         </span>
       </div>`;
     }).join('');
@@ -1023,13 +1082,13 @@ function renderTimesheet(){
     return `<div class="ts-card">
       <div class="ts-card-hdr">
         <span class="ts-card-name">${name}</span>
-        <span class="ts-card-total">${w.totalH.toFixed(1)}ч всего</span>
+        <span class="ts-card-total">${w.shiftCount} смен · ${w.totalH.toFixed(1)}ч</span>
       </div>
       ${rows}
       <div class="ts-summary">
         <div class="ts-sum-item"><div class="ts-sum-n">${w.totalH.toFixed(1)}</div><div class="ts-sum-l">Всего часов</div></div>
-        <div class="ts-sum-item"><div class="ts-sum-n">${dayH.toFixed(1)}</div><div class="ts-sum-l">Дневных</div></div>
-        <div class="ts-sum-item"><div class="ts-sum-n" style="color:var(--night)">${w.nightH.toFixed(1)}</div><div class="ts-sum-l">Ночных</div></div>
+        <div class="ts-sum-item"><div class="ts-sum-n">${dayH.toFixed(1)}</div><div class="ts-sum-l">☀️ Дневных</div></div>
+        <div class="ts-sum-item"><div class="ts-sum-n" style="color:var(--night)">${w.nightH.toFixed(1)}</div><div class="ts-sum-l">🌙 Ночных</div></div>
       </div>
     </div>`;
   }).join('');
@@ -1060,11 +1119,17 @@ function setPeriodL(d,el){ logPeriod=d; document.querySelectorAll('#tab-log .pbt
 function renderLog(){
   const cutoffISO=fmtMsk(new Date(mskNow().getTime()-logPeriod*864e5));
   const visits=[...allVisits].filter(v=>v.dateISO>=cutoffISO)
-    .sort((a,b)=>((b.dateISO||'')+(b.time||''))>((a.dateISO||'')+(a.time||''))?1:-1).slice(0,300);
+    .sort((a,b)=>{
+      const ka=(b.dateISO||'')+'_'+(b.time||'').replace(/\D/g,'');
+      const kb=(a.dateISO||'')+'_'+(a.time||'').replace(/\D/g,'');
+      return ka>kb?1:ka<kb?-1:0;
+    }).slice(0,300);
   const tbody=document.getElementById('logTbody');
   if(!visits.length){ tbody.innerHTML='<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--light)">Нет записей</td></tr>'; return; }
   tbody.innerHTML=visits.map(v=>{
     const dStr=new Date((v.dateISO||todayMsk())+'T12:00:00').toLocaleDateString('ru',{day:'numeric',month:'short'});
+    // Защитный парсинг: "1899-12-30T..." → форматируем как время UTC (фактически нет смещения в Excel serial)
+    const timeDisplay=fmtRawTime(v.time);
     const ords=v.ordersArr.filter(o=>o.id&&o.id!=='__other__'&&o.id!=='(нет в списке)');
     const hasOther=v.ordersArr.some(o=>o.id==='__other__'||o.id==='(нет в списке)');
     const ordHtml=ords.length
@@ -1075,7 +1140,7 @@ function renderLog(){
         : '—';
     return `<tr>
       <td>${dStr}</td>
-      <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted)">${v.time||'—'}</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted)">${timeDisplay}</td>
       <td><span class="badge ${v.isNight?'night':'day'}">${v.isNight?'Ночь':'День'}</span></td>
       <td><strong>${v.worker||'—'}</strong></td>
       <td>${v.visitor?`<span class="badge ${v.visitor}">${VIS[v.visitor]||v.visitor}</span>`:'—'}</td>
@@ -1160,10 +1225,13 @@ function renderLinkTab(){
     visits.forEach((v,i)=>{
       const opLabel={Выдача:'📦 Выдача','Получение (наш)':'📥 Получение','Получение+Возврат':'🔃 Получ.+Возврат',Возврат:'🔄 Возврат','Возврат (наш)':'📤 Возврат'}[v.operation]||v.operation;
       const visLabel={client:'🧑 Клиент',yandex:'🚕 Яндекс',our:'🚛 Наш курьер'}[v.visitor]||v.visitor;
+      // shiftDate может быть "2026-06-12" (ISO) или "12.06.2026" (dd.MM.yyyy) — форматируем
+      const shiftDateFmt2 = fmtShiftDate(v.shiftDate, null) || v.shiftDate;
+      const timeFmt2 = fmtRawTime(v.time);
       html+=`<div class="visit-card">
         <div class="visit-card-top">
           <div>
-            <div class="visit-card-title">${v.shiftDate} · ${v.time||'—'} МСК</div>
+            <div class="visit-card-title">${shiftDateFmt2} · ${timeFmt2||'—'} МСК</div>
             <div class="visit-card-meta">${v.worker} · ${v.isNight==='Ночь'?'🌙':'☀️'} · ${visLabel} · ${opLabel}</div>
           </div>
           <button class="link-btn" onclick="openLinkModal(${i})">Связать →</button>

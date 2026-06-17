@@ -563,8 +563,12 @@ function getAllShifts() {
     const startKey = r[1] instanceof Date ? r[1].toISOString() : (r[1]||'').toString();
     const key = `${startKey}_${workerName}`;
     if (!map[key]) {
+      // shiftDate (r[0]) может быть Date-объектом если Sheets хранит как дату — форматируем в dd.MM.yyyy
+      const shiftDateFmt = r[0] instanceof Date
+        ? Utilities.formatDate(r[0], tz, 'dd.MM.yyyy')
+        : (r[0]||'').toString();
       map[key] = {
-        shiftDate: r[0], shiftStart: r[1], shiftEnd: r[2],
+        shiftDate: shiftDateFmt, shiftStart: r[1], shiftEnd: r[2],
         worker: workerName, isNight: r[4], totalEntries: Number(r[5])||0,
         entries: []
       };
@@ -572,7 +576,12 @@ function getAllShifts() {
 
     if (r[6]) {
       // Строки одного визита: время + время внесения + посетитель + операция
-      const visitKey = `${r[14]}_${r[15]}_${r[6]}_${r[7]}`;
+      // r[14] и r[15] могут быть Date-объектами (Excel-эпоха 1899-12-30) если ячейка
+      // отформатирована как «Время» в Sheets — форматируем принудительно как HH:mm
+      const fmtTime = v => v ? (v instanceof Date ? Utilities.formatDate(v, tz, 'HH:mm') : v.toString().trim()) : '';
+      const timeVal     = fmtTime(r[14]);
+      const timeAutoVal = fmtTime(r[15]);
+      const visitKey = `${timeVal}_${timeAutoVal}_${r[6]}_${r[7]}`;
       let visit = map[key].entries.find(e => e._visitKey === visitKey);
       if (!visit) {
         visit = {
@@ -580,7 +589,7 @@ function getAllShifts() {
           visitor:   reverseVisitor(r[6]),
           operation: reverseOperation(r[7]),
           orders: [],
-          time:    r[14], timeAuto: r[15],
+          time:    timeVal, timeAuto: timeAutoVal,
           night:   r[16], comment:  r[17],
           date:    dateKey(r[18]) || '', // дата визита (кол. 19), yyyy-mm-dd
           timestamp: r[1],
