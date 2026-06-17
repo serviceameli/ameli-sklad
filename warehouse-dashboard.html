@@ -135,6 +135,19 @@ table.dt tbody tr:last-child td{border-bottom:none}
 .sync-btn:disabled{opacity:.5;cursor:default}
 .exp-btn:hover{background:#333}
 
+/* ── CONFIRM MODAL ── */
+#confirmModal{display:none;position:fixed;inset:0;z-index:1200;background:rgba(0,0,0,.55);backdrop-filter:blur(2px);align-items:center;justify-content:center}
+#confirmModal.open{display:flex}
+.confirm-box{background:var(--card);border-radius:16px;padding:28px 24px 20px;max-width:360px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.25)}
+.confirm-title{font-size:15px;font-weight:700;color:var(--black);margin-bottom:10px}
+.confirm-body{font-size:13px;color:var(--mid);line-height:1.55;margin-bottom:20px}
+.confirm-note{font-size:11px;color:var(--muted);margin-top:6px}
+.confirm-btns{display:flex;gap:10px;justify-content:flex-end}
+.confirm-cancel{background:none;border:1px solid var(--rule);border-radius:9px;padding:9px 18px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:600;color:var(--mid);cursor:pointer}
+.confirm-ok{background:#c0392b;border:none;border-radius:9px;padding:9px 18px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:600;color:#fff;cursor:pointer}
+.confirm-ok:hover{background:#a93226}
+.confirm-cancel:hover{border-color:var(--mid)}
+
 /* ── INSIGHT CARD ── */
 .insight-card{background:var(--black);border-radius:12px;padding:16px 18px;margin-bottom:20px;color:#fff}
 .insight-title{font-size:11px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
@@ -419,6 +432,18 @@ table.dt tbody tr:last-child td{border-bottom:none}
 </div><!-- /main -->
 
 <!-- LINK MODAL -->
+<!-- ══ CONFIRM MODAL ══ -->
+<div id="confirmModal">
+  <div class="confirm-box">
+    <div class="confirm-title" id="confirmTitle">Подтвердите действие</div>
+    <div class="confirm-body" id="confirmBody"></div>
+    <div class="confirm-btns">
+      <button class="confirm-cancel" onclick="closeConfirm()">Отмена</button>
+      <button class="confirm-ok" id="confirmOkBtn" onclick="resolveConfirm(true)">Удалить</button>
+    </div>
+  </div>
+</div>
+
 <div id="linkModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:600;align-items:flex-end;justify-content:center">
   <div style="background:#fff;border-radius:16px 16px 0 0;padding:22px 20px 32px;width:100%;max-width:600px;max-height:80vh;overflow-y:auto;animation:slideUp .2s ease">
     <div style="font-size:16px;font-weight:700;color:var(--black);margin-bottom:4px">Связать визит с заказами</div>
@@ -1265,17 +1290,57 @@ function genDemoShifts(){
 }
 
 // ══════════════════════════════════════════
+// CUSTOM CONFIRM MODAL
+// ══════════════════════════════════════════
+let _confirmResolve = null;
+
+function showConfirm(title, bodyHtml, okLabel) {
+  document.getElementById('confirmTitle').textContent = title;
+  document.getElementById('confirmBody').innerHTML = bodyHtml;
+  document.getElementById('confirmOkBtn').textContent = okLabel || 'Удалить';
+  document.getElementById('confirmModal').classList.add('open');
+  return new Promise(r => { _confirmResolve = r; });
+}
+
+function resolveConfirm(val) {
+  document.getElementById('confirmModal').classList.remove('open');
+  if (_confirmResolve) { _confirmResolve(val); _confirmResolve = null; }
+}
+
+function closeConfirm() { resolveConfirm(false); }
+
+// Закрытие по клику вне модала
+document.addEventListener('click', e => {
+  if (e.target.id === 'confirmModal') closeConfirm();
+});
+
+// ══════════════════════════════════════════
 // DELETE ORDER
 // ══════════════════════════════════════════
 async function deleteOrderUI(orderId, client) {
-  if (!confirm(`Удалить заказ ${orderId} (${client || '—'}) из базы?\n\nЗаказ исчезнет из списков. Визиты в журнале останутся.`)) return;
+  const {issued, returned} = getOrderStatuses();
+  const wasIssued   = issued.has(orderId);
+  const wasReturned = returned.has(orderId);
+
+  let statusNote = '';
+  if (wasReturned)     statusNote = '<div class="confirm-note">⚠️ Заказ уже возвращён. Записи в журнале останутся.</div>';
+  else if (wasIssued)  statusNote = '<div class="confirm-note">⚠️ Заказ уже выдан. Записи в журнале останутся.</div>';
+  else                 statusNote = '<div class="confirm-note">Заказ ещё не выдан — в журнале нет связанных записей.</div>';
+
+  const ok = await showConfirm(
+    'Удалить заказ?',
+    `Заказ <strong>${orderId}</strong>${client ? ' · ' + client : ''} будет удалён из базы.${statusNote}`,
+    'Удалить'
+  );
+  if (!ok) return;
+
   try {
     await WHApi.deleteOrder(orderId);
     todayOrders = todayOrders.filter(o => o.id !== orderId);
     renderOrders();
     showToast(`Заказ ${orderId} удалён`);
   } catch(e) {
-    alert('Ошибка удаления: ' + e.message);
+    showToast('Ошибка: ' + e.message);
   }
 }
 
