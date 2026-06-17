@@ -21,6 +21,18 @@
     const p = iso.split('-');
     return p.length === 3 ? p[2] + '.' + p[1] + '.' + p[0] : iso;
   }
+  // Нормализует visit_time: "HH:MM" → "HH:MM", "1899-12-29T22:05:43.000Z" → "01:05" (UTC+3)
+  function fmtVisitTime(v) {
+    if (!v) return '';
+    const s = v.toString().trim();
+    if (s.startsWith('1899-12-')) {
+      const d = new Date(s);
+      return d.toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' });
+    }
+    const m = s.match(/^(\d{1,2}):(\d{2})/);
+    return m ? m[1].padStart(2, '0') + ':' + m[2] : s;
+  }
+
   // dd.mm.yyyy → yyyy-mm-dd
   function isoDate(ddmm) {
     if (!ddmm) return mskToday();
@@ -81,7 +93,7 @@
       orders: (voByVisit[v.id] || []).filter(o => o.order_no).map(o => ({
         id: o.order_no, client: o.client_snapshot || '', returnDate: o.return_date_snapshot || '', delivery: o.delivery_snapshot || ''
       })),
-      time: v.visit_time || '', timeAuto: v.visit_time || '',
+      time: fmtVisitTime(v.visit_time), timeAuto: fmtVisitTime(v.visit_time),
       night: v.is_night ? 'Ночь' : 'День', comment: v.comment || '',
       date: v.visit_date || '', isOther: !!v.is_other
     });
@@ -148,7 +160,7 @@
       .gte('visit_date', twoDaysAgo);
     const otherVisits = (otherQ.data || []).map(v => ({
       visitor: v.visitor, operation: v.operation,
-      time: v.visit_time, date: v.visit_date,
+      time: fmtVisitTime(v.visit_time), date: v.visit_date,
       worker: v.worker, comment: v.comment || ''
     }));
 
@@ -294,7 +306,7 @@
       return {
         visitKey: v.id,
         shiftDate: s.shift_date || v.visit_date || '',
-        time: v.visit_time || '',
+        time: fmtVisitTime(v.visit_time),
         worker: v.worker || s.worker || '',
         isNight: v.is_night ? 'Ночь' : 'День',
         visitor: v.visitor || '',

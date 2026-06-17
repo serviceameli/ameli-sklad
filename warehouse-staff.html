@@ -320,6 +320,12 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
 .otap-check{width:22px;height:22px;border-radius:50%;border:2px solid var(--rule);display:flex;align-items:center;justify-content:center;font-size:11px;color:transparent;flex-shrink:0;transition:all .12s}
 .otap.sel .otap-check{background:var(--accent);border-color:var(--accent);color:var(--black)}
 .otap-sep{font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--light);padding:4px 0 1px}
+.otap-sep-collapse{cursor:pointer;display:flex;align-items:center;gap:6px;user-select:none}
+.otap-sep-collapse:hover{color:var(--mid)}
+.collapse-arrow{transition:transform .2s;display:inline-block}
+.otap-sep-collapse.open .collapse-arrow{transform:rotate(180deg)}
+.overdue-list{overflow:hidden;max-height:0;transition:max-height .25s ease}
+.overdue-list.open{max-height:9999px}
 
 /* ── OVERDUE ── */
 .badge-overdue{display:inline-block;background:rgba(231,76,60,.15);color:#c0392b;border-radius:20px;font-size:10px;font-weight:700;padding:2px 7px}
@@ -1036,7 +1042,10 @@ function updateShiftInfoCard(){
   const el=document.getElementById('shiftInfoCard');
   const sub=document.getElementById('shiftInfoSub');
   if(!el) return;
-  el.textContent=worker+(shiftStart?` · с ${pad(new Date(shiftStart.getTime()+3*3600000).getUTCHours())+':'+pad(new Date(shiftStart.getTime()+3*3600000).getUTCMinutes())} МСК`:'');
+  const msk=shiftStart?new Date(shiftStart.getTime()+3*3600000):null;
+  const timeStr=msk?pad(msk.getUTCHours())+':'+pad(msk.getUTCMinutes()):'';
+  const dateStr=msk?msk.toLocaleDateString('ru',{day:'numeric',month:'long',timeZone:'UTC'}):'';
+  el.textContent=worker+(msk?` · с ${timeStr} МСК, ${dateStr}`:'');
   if(sub) sub.textContent=(shiftStart?isNightAt(shiftStart):isNight())?'🌙 Ночная смена':'☀️ Дневная смена';
 }
 
@@ -1067,8 +1076,8 @@ function populateOrders(){
   let html='';
 
   if(overdue.length){
-    html+=`<div class="otap-sep">🔴 Просрочены</div>`;
-    html+=overdue.map(o=>tapRow(o,'ov')).join('');
+    html+=`<div class="otap-sep otap-sep-collapse" onclick="toggleOverdue(this)">🔴 Просрочены (${overdue.length}) <span class="collapse-arrow">▼</span></div>`;
+    html+=`<div class="overdue-list collapsed">${overdue.map(o=>tapRow(o,'ov')).join('')}</div>`;
   }
   if(toIssue.length){
     html+=`<div class="otap-sep">📦 К выдаче</div>`;
@@ -1094,10 +1103,19 @@ function tapRow(o, badgeCls, locked, forceType){
   const chkId=locked?`otap-chk-ret-${o.id}`:`otap-chk-${o.id}`;
   const clickAttr=locked?'style="opacity:0.4;pointer-events:none"':`onclick="tapOrder('${jsq(o.id)}'${forceType?`,'${forceType}'`:''})"`;
   const hint=locked?`<span style="font-size:10px;color:#888;margin-left:4px">— сначала выдайте</span>`:'';
+  // Для просроченных: показываем дату возврата и кол-во дней просрочки
+  let overdueHint='';
+  if(badgeCls==='ov' && o.returnDate){
+    const retParts=o.returnDate.split('.');
+    const retDate=retParts.length===3?new Date(`${retParts[2]}-${retParts[1]}-${retParts[0]}`):null;
+    const days=retDate?Math.floor((Date.now()-retDate)/86400000):0;
+    overdueHint=`<div style="font-size:10px;color:#c0392b;margin-top:1px">📅 возврат ${o.returnDate}${days>0?` · просрочен ${days} дн.`:''}</div>`;
+  }
   return `<div class="otap" id="${rowId}" ${clickAttr}>
     <div class="otap-left">
       <div class="otap-id">${esc(o.id)}${hint}</div>
       <div class="otap-client">${esc(o.client||'')}</div>
+      ${overdueHint}
     </div>
     <div style="display:flex;align-items:center;gap:7px">
       <span class="otap-badge ${badgeCls}">${label}</span>
@@ -1105,6 +1123,20 @@ function tapRow(o, badgeCls, locked, forceType){
     </div>
   </div>`;
 }
+
+function toggleOverdue(el){
+  el.classList.toggle('open');
+  el.nextElementSibling.classList.toggle('open');
+}
+
+// Тост при нажатии на заблокированную кнопку «Добавить визит»
+document.addEventListener('click', e => {
+  const btn = document.getElementById('addBtn');
+  if(btn && btn.disabled && e.target === btn){
+    e.preventDefault();
+    showToast('Сначала выберите заказ из списка');
+  }
+}, true);
 
 function tapOrder(id, forceType){
   const already=pendingOrders.find(o=>o.id===id);

@@ -649,19 +649,19 @@ function renderOrders(){
   });
 
   // Pending first, done last
-  const rowOf = (o,typeLabel) => {
+  const rowOf = (o, typeLabel, forceOverdue) => {
     const s = statusOf(o);
     const done = s==='issued'||s==='returned';
     const dateRange = [o.issueDate,o.returnDate].filter(Boolean).join(' → ');
     const delivBadge = o.delivery?.includes('Наш')
       ? `<span class="badge delivery">🚛 Наша</span>`
       : `<span class="badge self">🚶 Самовывоз</span>`;
-    const statusBadge = s==='issued'
+    const statusBadge = forceOverdue || o.overdue
+      ? `<span class="badge" style="background:rgba(231,76,60,.15);color:#c0392b">🔴 Просрочен</span>`
+      : s==='issued'
       ? `<span class="badge issued">✓ Выдан</span>`
       : s==='returned'
       ? `<span class="badge returned">✓ Возвращён</span>`
-      : o.overdue
-      ? `<span class="badge" style="background:rgba(231,76,60,.15);color:#c0392b">🔴 Просрочен</span>`
       : typeLabel==='issue'
       ? `<span class="badge pending">⏳ Ожидает</span>`
       : `<span class="badge" style="background:rgba(61,155,233,.15);color:#1a6fa0">🔄 Ожидает</span>`;
@@ -679,9 +679,9 @@ function renderOrders(){
     </tr>`};
   };
 
-  const buildSection = (orders, typeLabel, title) => {
+  const buildSection = (orders, typeLabel, title, forceOverdue) => {
     if(!orders.length) return '';
-    const rows = orders.map(o=>rowOf(o,typeLabel));
+    const rows = orders.map(o=>rowOf(o,typeLabel,forceOverdue));
     const pending = rows.filter(r=>!r.done);
     const done    = rows.filter(r=>r.done);
     let html = `<div class="orders-section-lbl">${title} (${orders.length})</div>
@@ -726,7 +726,7 @@ function renderOrders(){
 
   document.getElementById('ordersContent').innerHTML =
     `<div class="twrap scroll">` +
-    buildSection(overdueList,'issue','🔴 Просрочены') +
+    buildSection(overdueList,'issue','🔴 Просрочены', true) +
     buildSection(toIssue,'issue','📦 К выдаче сегодня') +
     buildSection(toReturn,'return','🔄 К возврату сегодня') +
     otherSection +
@@ -1016,7 +1016,7 @@ function fmtShiftDate(shiftDate, shiftStart){
   }
   if(!d && shiftStart) d = new Date(new Date(shiftStart).getTime()+MSK_OFFSET*3600000);
   if(!d) return '—';
-  return d.toLocaleDateString('ru',{weekday:'short',day:'numeric',month:'long'});
+  return d.toLocaleDateString('ru',{day:'numeric',month:'short',timeZone:'Europe/Moscow'});
 }
 
 // Парсит «сырое» время: "14:30" → "14:30", "1899-12-30T11:03:43.000Z" → "14:03" (UTC+3)
@@ -1060,12 +1060,21 @@ function renderTimesheet(){
       const startH = s.shiftStart?new Date(s.shiftStart).getUTCHours()+MSK_OFFSET:0;
       const endH   = s.shiftEnd?new Date(s.shiftEnd).getUTCHours()+MSK_OFFSET:25;
       const crossesMidnight = s.shiftEnd && (endH%24)<(startH%24);
+      // Дата конца для многодневных смен (переход через несколько суток)
+      const startDateStr = s.shiftStart ? new Date(s.shiftStart).toLocaleDateString('ru',{day:'numeric',month:'short',timeZone:'Europe/Moscow'}) : '';
+      const endDateStr   = s.shiftEnd   ? new Date(s.shiftEnd  ).toLocaleDateString('ru',{day:'numeric',month:'short',timeZone:'Europe/Moscow'}) : '';
+      const showEndDate  = s.shiftEnd && endDateStr !== startDateStr;
       const endLabel = isOpen
         ? `<span style="color:var(--client);font-size:10px">● идёт</span>`
-        : (crossesMidnight ? `${tEnd} <span style="font-size:9px;color:var(--muted)">след.</span>` : tEnd);
-      if(isBogus) return `<div class="ts-row" style="background:rgba(231,76,60,.06)">
-        <span class="ts-date" style="color:#c0392b">⚠️ ${dStr} · ${tStart}→${tEnd}</span>
-        <span style="color:#c0392b;font-weight:700;font-size:11px">${s.hours}ч — некорр. данные</span>
+        : showEndDate
+          ? `${tEnd} <span style="font-size:10px;color:var(--muted)">${endDateStr}</span>`
+          : tEnd;
+      if(isBogus) return `<div class="ts-row" style="background:rgba(231,76,60,.12);border-left:3px solid #c0392b;padding-left:10px">
+        <div>
+          <div class="ts-date" style="color:#c0392b">⚠️ ${dStr}</div>
+          <div style="font-size:10px;color:#c0392b;margin-top:1px">${tStart} → ${tEnd}${showEndDate?' · '+endDateStr:''} · некорректные данные</div>
+        </div>
+        <span style="color:#c0392b;font-weight:700;font-size:13px">${s.hours}ч</span>
       </div>`;
       return `<div class="ts-row">
         <div>
@@ -1074,7 +1083,7 @@ function renderTimesheet(){
         </div>
         <span style="text-align:right">
           <div class="ts-hours">${isOpen?'—':s.hours+'ч'}</div>
-          ${!isOpen&&s.hours>0?`<div style="font-size:10px;margin-top:1px;color:var(--muted)">☀️${dayH} · <span style="color:var(--night)">🌙${s.nightHours}</span></div>`:''}
+          ${!isOpen&&s.hours>0?`<div style="font-size:10px;margin-top:2px;color:var(--muted)">☀️ ${dayH}ч · <span style="color:var(--night)">🌙 ${s.nightHours}ч</span></div>`:''}
         </span>
       </div>`;
     }).join('');
