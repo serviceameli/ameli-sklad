@@ -165,10 +165,13 @@ table.dt tbody tr:last-child td{border-bottom:none}
 .visit-card-comment{font-size:12px;color:var(--mid);background:var(--bg);border-radius:7px;padding:6px 10px;font-style:italic}
 .link-btn{background:var(--black);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap}
 .link-btn:hover{background:#333}
-.order-check-row{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--rule);cursor:pointer}
+.order-check-row{display:flex;align-items:center;gap:12px;padding:11px 14px;border-bottom:1px solid var(--rule);cursor:pointer;user-select:none;transition:background .1s}
 .order-check-row:last-child{border-bottom:none}
 .order-check-row:hover{background:var(--bg)}
-.order-check-row input[type=checkbox]{width:18px;height:18px;accent-color:var(--black);flex-shrink:0}
+.order-check-row.selected{background:var(--accent-dim)}
+.order-radio{width:18px;height:18px;border-radius:50%;border:2px solid var(--rule);flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:border-color .12s,background .12s}
+.order-check-row.selected .order-radio{border-color:var(--black);background:var(--black)}
+.order-check-row.selected .order-radio::after{content:'';width:6px;height:6px;border-radius:50%;background:#fff}
 .order-check-id{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:var(--black)}
 .order-check-client{font-size:11px;color:var(--muted);margin-top:1px}
 .no-unmatched{text-align:center;padding:48px 20px;color:var(--light)}
@@ -1202,8 +1205,8 @@ function openLinkModal(visitIdx){
     const dateLbl = o.orderType === 'return'
       ? (o.returnDate ? ' · возврат ' + o.returnDate : '')
       : (o.issueDate  ? ' · выдача '  + o.issueDate  : '');
-    return `<div class="order-check-row" onclick="toggleOrderCheck('${o.id}',this)">
-        <input type="checkbox" id="chk-${o.id}" value="${o.id}">
+    return `<div class="order-check-row" id="row-${o.id}" onclick="selectOrder('${o.id}')">
+        <div class="order-radio"></div>
         <div>
           <div class="order-check-id">${o.id}${badge}</div>
           <div class="order-check-client">${o.client}${dateLbl}</div>
@@ -1223,12 +1226,12 @@ function openLinkModal(visitIdx){
   document.getElementById('linkConfirmBtn').disabled=true;
 }
 
-function toggleOrderCheck(id, row){
-  const chk=document.getElementById('chk-'+id);
-  chk.checked=!chk.checked;
-  if(chk.checked){ selectedOrderIds.add(id); row.style.background='var(--accent-dim)'; }
-  else { selectedOrderIds.delete(id); row.style.background=''; }
-  document.getElementById('linkConfirmBtn').disabled=selectedOrderIds.size===0;
+function selectOrder(id){
+  // Снимаем выбор со всех строк
+  document.querySelectorAll('.order-check-row').forEach(r => r.classList.remove('selected'));
+  selectedOrderIds = new Set([id]);
+  document.getElementById('row-' + id)?.classList.add('selected');
+  document.getElementById('linkConfirmBtn').disabled = false;
 }
 
 function closeLinkModal(){
