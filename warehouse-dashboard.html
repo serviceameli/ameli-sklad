@@ -1046,9 +1046,9 @@ function renderTimesheet(){
   shifts.forEach(s=>{
     if(!wmap[s.worker]) wmap[s.worker]={shifts:[],totalH:0,nightH:0,shiftCount:0};
     const h=calcShiftHours(s);
-    wmap[s.worker].shifts.push({...s,hours:h.total,nightHours:h.night});
-    wmap[s.worker].totalH+=h.total;
-    wmap[s.worker].nightH+=h.night;
+    const bogus = h.total > 24;
+    wmap[s.worker].shifts.push({...s,hours:h.total,nightHours:h.night,bogus});
+    if(!bogus){ wmap[s.worker].totalH+=h.total; wmap[s.worker].nightH+=h.night; }
     wmap[s.worker].shiftCount++;
   });
 
@@ -1059,7 +1059,7 @@ function renderTimesheet(){
       const tEnd  = s.shiftEnd  ?new Date(s.shiftEnd).toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit',timeZone:'Europe/Moscow'}):'в процессе';
       const isOpen= !s.shiftEnd;
       // Предупреждение: смена > 24ч явно некорректна
-      const isBogus = s.hours > 24;
+      const isBogus = s.bogus;
       const dayH  = Math.round((s.hours-s.nightHours)*10)/10;
       // Суточный переход: если конец < начало по часам — смена через полночь
       const startH = s.shiftStart?new Date(s.shiftStart).getUTCHours()+MSK_OFFSET:0;
