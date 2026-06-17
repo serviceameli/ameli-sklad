@@ -421,7 +421,9 @@ table.dt tbody tr:last-child td{border-bottom:none}
   </div>
 </div>
 
-<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="config.js?v=3"></script>
+<script src="api.js?v=3"></script>
 <script>
 // ═══════════════
 // URL берётся из файла config.js (лежит рядом с этим файлом)
@@ -469,8 +471,7 @@ async function loadData(){
     todayOrders= genDemoOrders();
   } else {
     try{
-      const r=await fetch(SCRIPT_URL+'?action=getAll');
-      const j=await r.json();
+      const j=await WHApi.getAll();
       allShifts  = j.shifts||local;
       todayOrders= j.orders||[];
       if(j.processedOrders) serverProcessed={issued:j.processedOrders.issued||[],returned:j.processedOrders.returned||[],otherVisits:j.processedOrders.otherVisits||[]};
@@ -512,10 +513,7 @@ async function loadData(){
   renderAll();
   // Check for unmatched visits and show notification
   if(!SCRIPT_URL.includes('YOUR_')){
-    fetch(SCRIPT_URL+'?action=getUnmatched&t='+Date.now())
-      .then(r=>r.json())
-      .then(j=>{ unmatchedData=j; updateLinkBadge(); })
-      .catch(()=>{});
+    WHApi.getUnmatched().then(j=>{ unmatchedData=j; updateLinkBadge(); }).catch(()=>{});
   }
 }
 
@@ -1097,8 +1095,7 @@ async function loadUnmatched(){
     return;
   }
   try{
-    const r=await fetch(SCRIPT_URL+'?action=getUnmatched&t='+Date.now());
-    unmatchedData=await r.json();
+    unmatchedData=await WHApi.getUnmatched();
   }catch(e){ unmatchedData={unmatchedVisits:[],unlistedOrders:[]}; }
   renderLinkTab();
   updateLinkBadge();
