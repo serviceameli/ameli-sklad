@@ -313,11 +313,19 @@
     const unlistedOrders = orders.filter(o => {
       const iss = o.issue_date || '', ret = o.return_date || '';
       const inRange = (iss >= sevenDaysAgo && iss <= today) || (ret >= sevenDaysAgo && ret <= today);
-      return inRange && !issuedSet.has(o.order_no) && !returnedSet.has(o.order_no);
-    }).map(o => ({
-      id: o.order_no, client: o.client || '',
-      issueDate: ddmmyyyy(o.issue_date), returnDate: ddmmyyyy(o.return_date)
-    }));
+      const notIssued   = inRange && !issuedSet.has(o.order_no);
+      const notReturned = inRange && issuedSet.has(o.order_no) && !returnedSet.has(o.order_no);
+      return notIssued || notReturned;
+    }).map(o => {
+      const issued   = issuedSet.has(o.order_no);
+      const returned = returnedSet.has(o.order_no);
+      const orderType = issued ? 'return' : 'issue';
+      return {
+        id: o.order_no, client: o.client || '',
+        issueDate: ddmmyyyy(o.issue_date), returnDate: ddmmyyyy(o.return_date),
+        orderType  // 'issue' = ещё не выдан, 'return' = выдан, ждёт возврата
+      };
+    });
 
     return { unmatchedVisits, unlistedOrders };
   }

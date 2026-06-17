@@ -1193,16 +1193,30 @@ function openLinkModal(visitIdx){
   document.getElementById('linkModalVisitInfo').textContent=
     `${v.shiftDate} · ${v.time} МСК · ${v.worker} · ${v.operation}${v.comment?' · «'+v.comment+'»':''}`;
 
-  const ordersHtml=orders.length
-    ? orders.map(o=>`
-        <div class="order-check-row" onclick="toggleOrderCheck('${o.id}',this)">
-          <input type="checkbox" id="chk-${o.id}" value="${o.id}">
-          <div>
-            <div class="order-check-id">${o.id}</div>
-            <div class="order-check-client">${o.client}${o.issueDate?' · выдача '+o.issueDate:''}</div>
-          </div>
-        </div>`).join('')
-    : `<div style="text-align:center;padding:20px;color:var(--light)">Нет заказов без записи в логе</div>`;
+  const issueOrders  = orders.filter(o => o.orderType !== 'return');
+  const returnOrders = orders.filter(o => o.orderType === 'return');
+  const orderRowHtml = o => {
+    const badge = o.orderType === 'return'
+      ? `<span style="font-size:9px;font-weight:700;color:#1a6fa0;background:rgba(61,155,233,.12);padding:2px 6px;border-radius:4px;margin-left:6px">🔄 к возврату</span>`
+      : `<span style="font-size:9px;font-weight:700;color:#1a8a4a;background:rgba(46,204,113,.12);padding:2px 6px;border-radius:4px;margin-left:6px">📦 к выдаче</span>`;
+    const dateLbl = o.orderType === 'return'
+      ? (o.returnDate ? ' · возврат ' + o.returnDate : '')
+      : (o.issueDate  ? ' · выдача '  + o.issueDate  : '');
+    return `<div class="order-check-row" onclick="toggleOrderCheck('${o.id}',this)">
+        <input type="checkbox" id="chk-${o.id}" value="${o.id}">
+        <div>
+          <div class="order-check-id">${o.id}${badge}</div>
+          <div class="order-check-client">${o.client}${dateLbl}</div>
+        </div>
+      </div>`;
+  };
+  let ordersHtml = '';
+  if (!orders.length) {
+    ordersHtml = `<div style="text-align:center;padding:20px;color:var(--light)">Нет подходящих заказов</div>`;
+  } else {
+    if (issueOrders.length)  ordersHtml += `<div style="font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);padding:8px 0 4px">К выдаче</div>` + issueOrders.map(orderRowHtml).join('');
+    if (returnOrders.length) ordersHtml += `<div style="font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);padding:8px 0 4px">К возврату</div>` + returnOrders.map(orderRowHtml).join('');
+  }
 
   document.getElementById('linkModalOrders').innerHTML=ordersHtml;
   document.getElementById('linkModal').style.display='flex';
