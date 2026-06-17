@@ -1,0 +1,1837 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Склад — Табель смены</title>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+:root{
+  --black:#1A1A1A;--text:#2D2D2D;--mid:#555;--muted:#888;--light:#bbb;
+  --rule:#e8e8e4;--bg:#F2F1EE;--card:#fff;
+  --accent:#F5C518;--accent-dim:rgba(245,197,24,.12);
+  --client:#2ECC71;--client-dim:rgba(46,204,113,.1);
+  --yandex:#FF6B35;--yandex-dim:rgba(255,107,53,.1);
+  --our:#3D9BE9;--our-dim:rgba(61,155,233,.1);
+  --issue:#8B5CF6;--issue-dim:rgba(139,92,246,.1);
+  --return-c:#EC4899;--return-dim:rgba(236,72,153,.1);
+  --pending:#F5C518;--issued:#2ECC71;--ret:#3D9BE9;
+}
+body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes rowIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pop{from{transform:scale(0);opacity:0}to{transform:scale(1);opacity:1}}
+@keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* ── HEADER ── */
+.hdr{background:var(--black);height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;position:sticky;top:0;z-index:300}
+.hdr-logo{font-size:11px;font-weight:700;letter-spacing:.22em;text-transform:uppercase;color:#fff}
+.hdr-logo em{color:var(--accent);font-style:normal}
+.pill{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;padding:4px 9px;border-radius:20px}
+.pill.day{background:var(--accent-dim);color:var(--accent);border:1px solid rgba(245,197,24,.4)}
+.pill.night{background:rgba(107,127,255,.15);color:#8899ff;border:1px solid rgba(107,127,255,.35)}
+
+/* ── AUTOSAVE ── */
+.save-banner{display:none;background:rgba(46,204,113,.1);border-bottom:1px solid rgba(46,204,113,.2);padding:5px 16px;font-size:11px;font-weight:600;color:#1a8a4a;align-items:center;gap:7px}
+.save-banner.show{display:flex}
+.save-dot{width:6px;height:6px;border-radius:50%;background:var(--issued);animation:blink 2s infinite;flex-shrink:0}
+
+/* ── SCREENS ── */
+.screen{display:none}.screen.active{display:block}
+
+/* ── RESTORE ── */
+.restore-banner{background:var(--black);color:#fff;padding:13px 15px;margin:13px 15px;border-radius:12px;display:none}
+.restore-banner.show{display:block}
+.rb-title{font-size:13px;font-weight:700;margin-bottom:3px}
+.rb-sub{font-size:11px;color:var(--light);margin-bottom:9px}
+.rb-acts{display:flex;gap:7px}
+.rb-yes{flex:2;background:var(--accent);color:var(--black);border:none;border-radius:8px;padding:9px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:700;cursor:pointer}
+.rb-no{flex:1;background:rgba(255,255,255,.08);color:var(--light);border:none;border-radius:8px;padding:9px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:600;cursor:pointer}
+
+/* ── WELCOME SCREEN ── */
+.wlc{padding:48px 24px;text-align:center}
+.wlc-avatar{width:72px;height:72px;border-radius:50%;background:var(--accent-dim);border:3px solid var(--accent);font-size:30px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px}
+.wlc-name{font-size:22px;font-weight:700;color:var(--black);margin-bottom:4px}
+.wlc-sub{font-size:13px;color:var(--muted);margin-bottom:36px}
+.wlc-btns{display:flex;flex-direction:column;gap:11px;max-width:320px;margin:0 auto}
+.wlc-btn{border:none;border-radius:14px;padding:18px;font-family:'Montserrat',sans-serif;font-size:15px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:12px;text-align:left;transition:all .14s}
+.wlc-btn:active{transform:scale(.98)}
+.wlc-btn.primary{background:var(--black);color:#fff}
+.wlc-btn.secondary{background:var(--card);color:var(--text);border:2px solid var(--rule)}
+.wlc-btn-ico{font-size:22px;flex-shrink:0}
+.wlc-btn-txt{display:flex;flex-direction:column;gap:2px}
+.wlc-btn-title{font-size:15px;font-weight:700}
+.wlc-btn-desc{font-size:11px;font-weight:500;opacity:.65}
+
+/* ── PIN SCREEN ── */
+.pin-wrap{padding:32px 20px;text-align:center}
+.pin-name{font-size:22px;font-weight:700;color:var(--black);margin-bottom:4px}
+.pin-sub{font-size:13px;color:var(--muted);margin-bottom:28px}
+.pin-dots{display:flex;justify-content:center;gap:12px;margin-bottom:24px}
+.pin-dot{width:16px;height:16px;border-radius:50%;background:var(--rule);transition:background .15s}
+.pin-dot.filled{background:var(--black)}
+.pin-pad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:240px;margin:0 auto}
+.pin-key{background:var(--card);border:2px solid var(--rule);border-radius:14px;padding:16px;font-size:20px;font-weight:700;cursor:pointer;font-family:'Montserrat',sans-serif;transition:all .12s}
+.pin-key:active{transform:scale(.93);background:var(--bg)}
+.pin-key.del{font-size:15px;color:var(--muted)}
+.pin-error{color:#E74C3C;font-size:13px;font-weight:600;margin-top:14px;min-height:20px}
+.pin-change{font-size:12px;color:var(--muted);text-decoration:underline;cursor:pointer;margin-top:16px;display:inline-block}
+
+/* ── WORKER SELECT ── */
+.ws{padding:18px 15px}
+.s-lbl{font-size:10px;font-weight:700;letter-spacing:.25em;text-transform:uppercase;color:var(--light);margin-bottom:4px}
+.s-h{font-size:21px;font-weight:700;color:var(--black);line-height:1.2;margin-bottom:4px}
+.s-meta{font-size:12px;color:var(--muted);font-weight:500;margin-bottom:18px}
+.wgrid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.wbtn{background:var(--card);border:2px solid var(--rule);border-radius:13px;padding:15px 10px 12px;display:flex;flex-direction:column;align-items:center;gap:5px;cursor:pointer;font-family:'Montserrat',sans-serif;transition:all .14s}
+.wbtn:active{transform:scale(.96)}
+.wbtn.sel{border-color:var(--accent);background:var(--accent-dim)}
+.wava{width:38px;height:38px;border-radius:50%;background:var(--bg);font-size:17px;display:flex;align-items:center;justify-content:center;border:2px solid var(--rule)}
+.wbtn.sel .wava{border-color:var(--accent);background:rgba(245,197,24,.2)}
+.wname{font-size:13px;font-weight:700;color:var(--black)}
+.wchk{width:15px;height:15px;border-radius:50%;border:2px solid var(--rule);display:flex;align-items:center;justify-content:center;font-size:9px;color:transparent;transition:all .14s}
+.wbtn.sel .wchk{background:var(--accent);border-color:var(--accent);color:var(--black)}
+.btn-primary{width:100%;background:var(--black);color:#fff;border:none;border-radius:13px;padding:14px;font-family:'Montserrat',sans-serif;font-size:14px;font-weight:700;cursor:pointer;margin-top:15px}
+.btn-primary:disabled{background:var(--rule);color:var(--light);cursor:not-allowed}
+
+/* ── SHIFT HEADER ── */
+.sinfo{background:var(--card);border-bottom:1px solid var(--rule);padding:9px 16px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:52px;z-index:200}
+.swho{font-size:13px;font-weight:700;color:var(--black)}
+.swho span{color:var(--muted);font-weight:500;font-size:11px;margin-left:5px}
+.schange{font-size:11px;font-weight:600;color:var(--muted);text-decoration:underline;cursor:pointer}
+
+/* ── SHIFT TABS ── */
+.shift-tabs{display:flex;background:var(--card);border-bottom:2px solid var(--rule);position:sticky;top:88px;z-index:199}
+.stab{flex:1;padding:9px 5px;font-size:11px;font-weight:700;text-align:center;cursor:pointer;color:var(--muted);border-bottom:3px solid transparent;transition:all .14s}
+.stab.active{color:var(--black);border-color:var(--accent)}
+.stab-badge{display:inline-block;background:var(--return-c);color:#fff;border-radius:20px;font-size:9px;font-weight:700;padding:1px 4px;margin-left:2px;vertical-align:middle}
+.stab-badge.grn{background:var(--issued)}
+
+.tabview{display:none}.tabview.active{display:block}
+
+/* ── ORDERS BAR ── */
+.orders-bar{display:flex;background:var(--black);align-items:center;padding:6px 12px;gap:0}
+.ob-item{display:flex;align-items:center;gap:5px;flex:1;justify-content:center}
+.ob-item:not(:last-child){border-right:1px solid rgba(255,255,255,.1);padding-right:0;margin-right:0}
+.ob-n{font-size:15px;font-weight:700;color:#fff;line-height:1}
+.ob-l{font-size:9px;font-weight:600;color:var(--muted)}
+.ob-item.pen .ob-n{color:var(--accent)}
+.ob-item.iss .ob-n{color:var(--issued)}
+.ob-item.ret .ob-n{color:var(--ret)}
+
+/* ── ADD FORM ── */
+.add-form{background:var(--card);border-bottom:2px solid var(--rule);padding:11px 15px 13px}
+.add-form-title{font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:9px;display:flex;align-items:center;justify-content:space-between}
+.add-collapse{font-size:11px;font-weight:600;color:var(--muted);cursor:pointer;text-decoration:underline;letter-spacing:0;text-transform:none}
+.flbl{font-size:9px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:var(--light);margin-bottom:3px;display:block}
+
+/* Segment */
+.seg{display:flex;border:2px solid var(--rule);border-radius:9px;overflow:hidden;background:var(--bg)}
+.sbtn{flex:1;border:none;background:none;font-family:'Montserrat',sans-serif;font-size:10px;font-weight:700;color:var(--muted);padding:7px 3px;cursor:pointer;text-align:center;transition:all .12s}
+.sbtn:not(:last-child){border-right:1px solid var(--rule)}
+.sbtn.act{background:var(--black);color:#fff}
+.sbtn.act.c{background:var(--client)}.sbtn.act.y{background:var(--yandex)}.sbtn.act.o{background:var(--our)}
+
+/* Order select */
+.order-sel-wrap{position:relative}
+.order-sel{width:100%;border:2px solid var(--rule);border-radius:9px;background:var(--bg);padding:8px 26px 8px 10px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:600;color:var(--black);appearance:none;-webkit-appearance:none;cursor:pointer}
+.order-sel:focus{outline:none;border-color:var(--accent);background:var(--card)}
+.order-sel-arr{position:absolute;right:8px;top:50%;transform:translateY(-50%);pointer-events:none;color:var(--light);font-size:11px}
+
+/* Order info */
+.order-info{background:var(--bg);border:1px solid var(--rule);border-radius:7px;padding:6px 9px;margin-top:4px;display:none;font-size:11px}
+.order-info.show{display:block}
+.oi-row{display:flex;justify-content:space-between;margin-bottom:2px}
+.oi-row:last-child{margin-bottom:0}
+.oi-lbl{color:var(--light);font-weight:600;font-size:10px}
+.oi-val{color:var(--black);font-weight:700;font-family:'JetBrains Mono',monospace;font-size:11px}
+
+/* Pending orders chips */
+.added-orders-list{display:flex;flex-wrap:wrap;gap:3px;margin-top:5px;min-height:22px}
+.ao-tag{display:inline-flex;align-items:center;gap:3px;background:var(--accent-dim);border:1px solid rgba(245,197,24,.45);border-radius:5px;padding:2px 7px;font-size:11px;font-weight:700;color:var(--black)}
+.ao-client{font-size:9px;color:var(--muted);font-weight:500;margin-left:1px}
+.ao-del{cursor:pointer;color:var(--muted);font-size:13px;line-height:1;margin-left:2px}
+.ao-empty{font-size:11px;color:var(--light);font-style:italic}
+.add-order-row{display:flex;gap:5px;align-items:flex-end;margin-top:5px}
+.add-order-row .order-sel-wrap{flex:1}
+.ao-add-btn{flex-shrink:0;width:36px;height:35px;border-radius:8px;border:none;background:var(--black);color:#fff;font-size:17px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.ao-add-btn:disabled{background:var(--rule);color:var(--light);cursor:not-allowed}
+
+/* Operation buttons — hidden for list orders, shown for "other" */
+.op-section{display:none}
+.op-section.show{display:block}
+.opg{display:flex;gap:5px}
+.opb{flex:1;border:2px solid var(--rule);background:var(--card);border-radius:7px;padding:6px 3px;font-family:'Montserrat',sans-serif;font-size:10px;font-weight:700;color:var(--muted);cursor:pointer;text-align:center;transition:all .12s}
+.opb.act{border-color:var(--accent);background:var(--accent-dim);color:var(--black)}
+.opb.auto{border-color:var(--issue);background:var(--issue-dim);color:#5b21b6}
+
+/* Date + Time + Comment */
+.dtc-row{display:grid;grid-template-columns:110px 90px 1fr;gap:7px;align-items:start;margin-top:7px}
+.field-g{display:flex;flex-direction:column}
+.date-sel{border:2px solid var(--rule);border-radius:9px;background:var(--bg);padding:6px 7px;font-family:'Montserrat',sans-serif;font-size:11px;font-weight:600;color:var(--black);appearance:none;-webkit-appearance:none;width:100%;text-align:center}
+.date-sel:focus{outline:none;border-color:var(--accent)}
+.date-sel.mod{border-color:#FF6B35;background:rgba(255,107,53,.06)}
+.time-inp{border:2px solid var(--accent);border-radius:9px;background:rgba(245,197,24,.06);padding:6px 7px;font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:var(--black);width:100%;text-align:center;box-sizing:border-box}
+.time-inp:focus{outline:none;border-color:var(--black);background:var(--card)}
+.inp-hint{font-size:9px;color:var(--muted);font-weight:500;margin-top:2px;text-align:center}
+.comment-inp{border:2px solid var(--rule);border-radius:9px;background:var(--bg);padding:6px 9px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:500;color:var(--black);width:100%;box-sizing:border-box}
+.comment-inp:focus{outline:none;border-color:var(--accent)}
+.add-btn{width:100%;height:41px;border-radius:11px;border:none;background:var(--accent);color:var(--black);font-size:13px;cursor:pointer;font-weight:700;font-family:'Montserrat',sans-serif;margin-top:7px}
+.add-btn:active{transform:scale(.98)}
+.add-btn:disabled{background:var(--rule);color:var(--light);cursor:not-allowed}
+
+/* ── LOG TABLE ── */
+.tarea{padding:11px 15px 90px}
+.tarea-hd{font-size:10px;font-weight:700;letter-spacing:.17em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;justify-content:space-between}
+.tarea-cnt{font-size:10px;font-weight:600;color:var(--light)}
+.ltbl{width:100%;border-collapse:collapse}
+.ltbl thead th{font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--light);padding:0 4px 6px;text-align:left;border-bottom:1px solid var(--rule)}
+.ltbl thead th.act{width:22px;text-align:center}
+.lrow{border-bottom:1px solid var(--rule);animation:rowIn .2s ease}
+.lrow td{padding:7px 4px;vertical-align:middle}
+.lrow-done td{opacity:.5}
+
+.tchip{display:inline-flex;padding:3px 6px;border-radius:20px;font-size:10px;font-weight:700;white-space:nowrap}
+.tchip.client{background:var(--client-dim);color:#1a8a4a}
+.tchip.yandex{background:var(--yandex-dim);color:#b84a1a}
+.tchip.our{background:var(--our-dim);color:#1a6fa0}
+.ochip{display:inline-flex;padding:3px 5px;border-radius:5px;font-size:9px;font-weight:700;white-space:nowrap}
+.ochip.issue{background:var(--issue-dim);color:#5b21b6}
+.ochip.return{background:var(--return-dim);color:#9d174d}
+.ochip.pickup{background:var(--our-dim);color:#1a6fa0}
+.ochip.dropoff{background:var(--return-dim);color:#9d174d}
+.ochip.both{background:rgba(100,100,200,.1);color:#3344aa}
+
+.onum{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;color:var(--black)}
+.time-chip{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;color:var(--muted);background:var(--bg);padding:2px 4px;border-radius:4px;white-space:nowrap}
+.time-rec{font-size:9px;font-weight:500;color:var(--light);font-family:'JetBrains Mono',monospace;display:block;margin-top:1px}
+.date-chip{font-size:9px;font-weight:600;display:block;margin-top:1px}
+
+.order-tags{display:flex;flex-wrap:wrap;gap:2px}
+.order-tag{display:inline-flex;align-items:center;gap:2px;background:var(--bg);border:1px solid var(--rule);border-radius:4px;padding:2px 5px;font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;color:var(--black);line-height:1.3}
+.order-tag .tag-client{font-family:'Montserrat',sans-serif;font-size:9px;color:var(--muted);font-weight:500;display:block}
+
+.dbtn{width:22px;height:22px;border-radius:5px;border:1px solid var(--rule);background:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--light);margin:auto}
+.dbtn:active{background:#fee;color:#c33}
+.empty-st{text-align:center;padding:22px 18px;color:var(--light)}
+.empty-st-ico{font-size:28px;margin-bottom:5px}
+.empty-st-txt{font-size:12px;font-weight:500}
+
+/* ── GROUP HEADER IN TABLE ── */
+.tg-hdr td{background:var(--bg);font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding:5px 4px;border-bottom:1px solid var(--rule)}
+
+/* ── SUBMIT FOOTER ── */
+.sub-footer{position:fixed;bottom:0;left:0;right:0;background:var(--card);border-top:1px solid var(--rule);padding:9px 15px 12px;z-index:198;box-shadow:0 -4px 14px rgba(0,0,0,.08)}
+.sub-btn{width:100%;background:var(--black);color:#fff;border:none;border-radius:11px;padding:13px;font-family:'Montserrat',sans-serif;font-size:13px;font-weight:700;cursor:pointer}
+.sub-btn:active{background:#333}
+.sub-btn:disabled{background:var(--rule);color:var(--light);cursor:not-allowed}
+.sub-hint{font-size:10px;color:var(--light);text-align:center;margin-top:3px}
+
+/* ── ORDERS TAB ── */
+.orders-tab-content{padding:11px 15px 90px}
+.osummary{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:11px}
+.osc{background:var(--card);border-radius:9px;padding:9px 7px;border:1px solid var(--rule);text-align:center}
+.osc-n{font-size:20px;font-weight:700;color:var(--black);line-height:1}
+.osc-l{font-size:8px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:var(--light);margin-bottom:3px}
+.order-card{background:var(--card);border-radius:11px;border:1px solid var(--rule);padding:10px 12px;margin-bottom:6px;border-left:4px solid var(--rule)}
+.order-card.pending{border-left-color:var(--pending)}
+.order-card.issued{border-left-color:var(--issued)}
+.order-card.return-due{border-left-color:var(--ret)}
+.order-card.returned{border-left-color:var(--issued)}
+.oc-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:3px}
+.oc-id{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:var(--black)}
+.oc-status{font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px}
+.oc-status.pending{background:rgba(245,197,24,.15);color:#a07800}
+.oc-status.issued{background:rgba(46,204,113,.15);color:#1a8a4a}
+.oc-status.return-due{background:rgba(61,155,233,.15);color:#1a6fa0}
+.oc-status.returned{background:rgba(46,204,113,.15);color:#1a8a4a}
+.oc-client{font-size:12px;font-weight:600;color:var(--text);margin-bottom:3px}
+.oc-meta{display:flex;gap:8px;font-size:10px;color:var(--muted);flex-wrap:wrap}
+.oc-worker{color:var(--client);font-weight:600;margin-left:auto}
+.sec-lbl{font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--light);margin:10px 0 6px}
+
+/* ── VIEW-ONLY BANNER ── */
+.vo-banner{background:var(--black);color:#fff;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+.vo-banner-txt{font-size:12px;font-weight:600;color:rgba(255,255,255,.75)}
+.vo-start-btn{flex-shrink:0;background:var(--accent);color:var(--black);border:none;border-radius:8px;padding:7px 13px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap}
+
+/* ── SUCCESS ── */
+.suc-screen{display:none;text-align:center;padding:55px 20px 40px}
+.suc-screen.active{display:block}
+.suc-ring{width:78px;height:78px;border-radius:50%;border:3px solid var(--client);background:var(--client-dim);font-size:32px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;animation:pop .35s cubic-bezier(.34,1.56,.64,1)}
+.suc-h{font-size:21px;font-weight:700;color:var(--black);margin-bottom:5px}
+.suc-sub{font-size:12px;color:var(--muted);margin-bottom:18px}
+.suc-sum{background:var(--card);border:1px solid var(--rule);border-radius:12px;padding:13px 15px;text-align:left;margin-bottom:18px}
+.sr{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--rule)}
+.sr:last-child{border-bottom:none}
+.sr-l{font-size:11px;color:var(--muted)}
+.sr-v{font-size:12px;font-weight:700;color:var(--black)}
+.btn-again{width:100%;background:var(--accent);color:var(--black);border:none;border-radius:13px;padding:14px;font-family:'Montserrat',sans-serif;font-size:14px;font-weight:700;cursor:pointer}
+
+/* ── VISITOR BUTTONS (horizontal row) ── */
+.vis-btns{display:flex;flex-direction:row;gap:7px}
+.vbtn{flex:1;border:2px solid var(--rule);background:var(--card);border-radius:12px;padding:10px 4px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:700;color:var(--text);cursor:pointer;text-align:center;transition:all .14s;display:flex;flex-direction:column;align-items:center;gap:4px;line-height:1.2}
+.vbtn .vbtn-icon{font-size:20px}
+.vbtn:active{transform:scale(.97)}
+.vbtn.act{color:#fff;border-color:transparent}
+.vbtn.act.c{background:var(--client)}
+.vbtn.act.y{background:var(--yandex)}
+.vbtn.act.o{background:var(--our)}
+/* ── TIME+COMMENT ── */
+.tc2-row{display:flex;flex-direction:column;gap:6px;margin-top:7px}
+.tc2-time-row{display:flex;align-items:center;gap:8px;position:relative;flex-wrap:wrap}
+.tc2-time-row .flbl{margin:0;white-space:nowrap;flex-shrink:0}
+.tc2-time-row .time-inp{width:100px;flex-shrink:0}
+/* ── COMPACT DATE ── */
+.date-compact-row{margin-top:5px;margin-bottom:2px}
+.date-compact-lbl{font-size:11px;color:var(--muted);font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:4px;padding:3px 0;user-select:none}
+.date-compact-lbl:hover{color:var(--black)}
+.date-compact-picker{margin-top:5px}
+/* ── MODAL ── */
+.ovl{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:800;align-items:flex-end;padding:0}
+.ovl.show{display:flex}
+.modal{background:var(--card);border-radius:20px 20px 0 0;padding:22px 20px 32px;width:100%;animation:slideUp .22s ease}
+.modal-h{font-size:17px;font-weight:700;color:var(--black);margin-bottom:3px}
+.modal-s{font-size:12px;color:var(--muted);margin-bottom:14px}
+.mrow{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--rule);font-size:13px}
+.mrow span{color:var(--muted)}.mrow b{color:var(--black);font-weight:700}
+.macts{display:flex;gap:9px;margin-top:16px}
+.mcancel{flex:1;background:var(--bg);border:2px solid var(--rule);border-radius:11px;padding:13px;font-family:'Montserrat',sans-serif;font-size:13px;font-weight:700;cursor:pointer;color:var(--text)}
+.mok{flex:2;background:var(--black);color:#fff;border:none;border-radius:11px;padding:13px;font-family:'Montserrat',sans-serif;font-size:13px;font-weight:700;cursor:pointer}
+/* ── TOAST ── */
+.toast{position:fixed;top:62px;left:50%;transform:translateX(-50%);background:var(--black);color:#fff;padding:10px 22px;border-radius:22px;font-size:13px;font-weight:700;z-index:999;opacity:0;transition:opacity .25s;pointer-events:none;white-space:nowrap;border:2px solid var(--accent)}
+.toast.show{opacity:1}
+/* ── TAP ORDER LIST ── */
+.order-tap-list{margin-top:5px;display:flex;flex-direction:column;gap:3px}
+.otap{display:flex;align-items:center;justify-content:space-between;background:var(--bg);border:2px solid var(--rule);border-radius:9px;padding:8px 11px;cursor:pointer;transition:all .12s;-webkit-tap-highlight-color:transparent}
+.otap:active{transform:scale(.98)}
+.otap.sel{background:var(--accent-dim);border-color:var(--accent)}
+.otap-left{display:flex;flex-direction:column;gap:1px}
+.otap-id{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:var(--black)}
+.otap-client{font-size:11px;color:var(--muted);font-weight:500}
+.otap-badge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;white-space:nowrap}
+.otap-badge.issue{background:var(--issue-dim);color:#5b21b6}
+.otap-badge.ret{background:var(--return-dim);color:#9d174d}
+.otap-badge.ov{background:rgba(231,76,60,.15);color:#c0392b}
+.otap-other{background:rgba(255,107,53,.1);border-color:var(--yandex);color:var(--yandex)}
+.otap-check{width:22px;height:22px;border-radius:50%;border:2px solid var(--rule);display:flex;align-items:center;justify-content:center;font-size:11px;color:transparent;flex-shrink:0;transition:all .12s}
+.otap.sel .otap-check{background:var(--accent);border-color:var(--accent);color:var(--black)}
+.otap-sep{font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--light);padding:4px 0 1px}
+
+/* ── OVERDUE ── */
+.badge-overdue{display:inline-block;background:rgba(231,76,60,.15);color:#c0392b;border-radius:20px;font-size:10px;font-weight:700;padding:2px 7px}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
+.ob-item.ov .ob-n{color:#E74C3C}
+.order-card.overdue{border-left-color:#E74C3C}
+.oc-status.overdue{background:rgba(231,76,60,.15);color:#c0392b;animation:pulse 2s infinite}
+</style>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../config.js?v=3"></script>
+  <script src="../api.js?v=3"></script>
+</head>
+<body>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<!-- CONFIRM MODAL -->
+<div class="ovl" id="ovl" onclick="closeModal(event)">
+  <div class="modal">
+    <div class="modal-h">Завершить смену?</div>
+    <div class="modal-s">Проверьте итоги перед отправкой</div>
+    <div id="modalRows"></div>
+    <div class="macts">
+      <button class="mcancel" onclick="closeModal()">Отмена</button>
+      <button class="mok" onclick="confirmSubmit()">✓ Отправить</button>
+    </div>
+  </div>
+</div>
+
+<!-- HEADER -->
+<div class="hdr">
+  <div class="hdr-logo">Ameli <em>Rental</em> · Склад</div>
+  <div class="pill day" id="pill">☀️ День</div>
+</div>
+<div class="save-banner" id="saveBanner">
+  <div class="save-dot"></div>
+  <span id="saveText">Черновик сохранён</span>
+</div>
+
+<!-- LOADING -->
+<div id="loadingScr" style="padding:60px 18px;text-align:center">
+  <div style="width:32px;height:32px;border:3px solid #e8e8e4;border-top-color:#F5C518;border-radius:50%;animation:spin .7s linear infinite;margin:0 auto 13px"></div>
+  <div style="font-size:13px;font-weight:600;color:#888">Загрузка заказов...</div>
+</div>
+
+<!-- ═══ WELCOME (персональная ссылка) ═══ -->
+<div class="screen" id="s-welcome">
+  <div class="wlc">
+    <div class="wlc-avatar" id="wlcAvatar">👤</div>
+    <div class="wlc-name" id="wlcName">—</div>
+    <div class="wlc-sub" id="wlcDate">—</div>
+    <div class="wlc-btns">
+      <button class="wlc-btn primary" onclick="welcomeStartShift()">
+        <span class="wlc-btn-ico">🔑</span>
+        <span class="wlc-btn-txt">
+          <span class="wlc-btn-title">Открыть смену</span>
+          <span class="wlc-btn-desc">Начать работу и добавлять визиты</span>
+        </span>
+      </button>
+      <button class="wlc-btn secondary" onclick="welcomeViewOnly()">
+        <span class="wlc-btn-ico">👀</span>
+        <span class="wlc-btn-txt">
+          <span class="wlc-btn-title">Посмотреть заказы</span>
+          <span class="wlc-btn-desc">Статусы заказов без открытия смены</span>
+        </span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ OLD SHIFT (смена висит > 12ч) ═══ -->
+<div class="screen" id="s-old-shift">
+  <div class="wlc">
+    <div style="font-size:44px;margin-bottom:12px">⏰</div>
+    <div class="wlc-name" id="oldShiftWorker">—</div>
+    <div class="wlc-sub" id="oldShiftInfo">Незакрытая смена</div>
+    <div class="wlc-btns">
+      <button class="wlc-btn primary" onclick="closeOldShift()">
+        <span class="wlc-btn-ico">✅</span>
+        <span class="wlc-btn-txt">
+          <span class="wlc-btn-title" id="oldShiftCloseLabel">Закрыть ту смену</span>
+          <span class="wlc-btn-desc">Отправить данные и завершить</span>
+        </span>
+      </button>
+      <button class="wlc-btn secondary" onclick="continueOldShift()">
+        <span class="wlc-btn-ico">▶️</span>
+        <span class="wlc-btn-txt">
+          <span class="wlc-btn-title">Продолжить смену</span>
+          <span class="wlc-btn-desc">Остаться в той же смене</span>
+        </span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ PIN ═══ -->
+<div class="screen" id="s-pin">
+  <div class="pin-wrap">
+    <div class="pin-name" id="pinWorkerName">—</div>
+    <div class="pin-sub">Введите PIN-код</div>
+    <div class="pin-dots">
+      <div class="pin-dot" id="pd0"></div>
+      <div class="pin-dot" id="pd1"></div>
+      <div class="pin-dot" id="pd2"></div>
+      <div class="pin-dot" id="pd3"></div>
+    </div>
+    <div class="pin-pad">
+      <button class="pin-key" onclick="pinKey('1')">1</button>
+      <button class="pin-key" onclick="pinKey('2')">2</button>
+      <button class="pin-key" onclick="pinKey('3')">3</button>
+      <button class="pin-key" onclick="pinKey('4')">4</button>
+      <button class="pin-key" onclick="pinKey('5')">5</button>
+      <button class="pin-key" onclick="pinKey('6')">6</button>
+      <button class="pin-key" onclick="pinKey('7')">7</button>
+      <button class="pin-key" onclick="pinKey('8')">8</button>
+      <button class="pin-key" onclick="pinKey('9')">9</button>
+      <button class="pin-key" style="visibility:hidden"></button>
+      <button class="pin-key" onclick="pinKey('0')">0</button>
+      <button class="pin-key del" onclick="pinDel()">⌫</button>
+    </div>
+    <div class="pin-error" id="pinError"></div>
+    <span class="pin-change" onclick="pinChangeWorker()">← Сменить кладовщика</span>
+  </div>
+</div>
+
+<!-- ═══ WORKER SELECT ═══ -->
+<div class="screen" id="s-worker">
+  <div class="ws">
+    <div class="s-lbl">Начало смены</div>
+    <div class="s-h">Кто сегодня<br>на складе?</div>
+    <div class="s-meta" id="dateLine">—</div>
+    <div class="restore-banner" id="restoreBanner">
+      <div class="rb-title">🔄 Найдена незакрытая смена</div>
+      <div class="rb-sub" id="restoreInfo">—</div>
+      <div class="rb-acts">
+        <button class="rb-yes" onclick="restoreShift()">✓ Восстановить</button>
+        <button class="rb-no" onclick="discardDraft()">Удалить</button>
+      </div>
+    </div>
+    <div class="wgrid" id="wgrid"></div>
+    <button class="btn-primary" id="startBtn" disabled onclick="startShift()">Начать смену →</button>
+  </div>
+</div>
+
+<!-- ═══ SHIFT ═══ -->
+<div class="screen" id="s-shift">
+  <div class="sinfo">
+    <div class="swho" id="shiftWho">—</div>
+  </div>
+
+  <!-- Баннер режима просмотра -->
+  <div class="vo-banner" id="voBanner" style="display:none">
+    <span class="vo-banner-txt">👀 Только просмотр — добавление визитов недоступно</span>
+    <button class="vo-start-btn" onclick="startShiftFromViewOnly()">Начать смену →</button>
+  </div>
+
+  <!-- Счётчик заказов — виден всегда -->
+  <div class="orders-bar">
+    <div class="ob-item pen"><div class="ob-n" id="bar-pending">0</div><div class="ob-l">ожид.</div></div>
+    <div class="ob-item iss"><div class="ob-n" id="bar-issued">0</div><div class="ob-l">выдано</div></div>
+    <div class="ob-item ret"><div class="ob-n" id="bar-returned">0</div><div class="ob-l">возвращено</div></div>
+    <div class="ob-item ov"><div class="ob-n" id="bar-overdue">0</div><div class="ob-l">🔴 просроч.</div></div>
+  </div>
+
+  <div class="shift-tabs">
+    <div class="stab active" id="stab-add" onclick="switchShiftTab('add')">＋ Визит</div>
+    <div class="stab" id="stab-orders" onclick="switchShiftTab('orders')">
+      📦 Заказы<span class="stab-badge" id="pendingBadge" style="display:none">0</span>
+    </div>
+    <div class="stab" id="stab-shift" onclick="switchShiftTab('shift')">
+      📋 Смена<span class="stab-badge grn" id="visitsBadge" style="display:none">0</span>
+    </div>
+  </div>
+
+  <!-- ── ТАБ 1: ДОБАВИТЬ ВИЗИТ ── -->
+  <div class="tabview active" id="tv-add">
+    <div class="add-form" style="border-bottom:none">
+      <div style="margin-bottom:10px">
+        <label class="flbl">Кто приехал</label>
+        <div class="vis-btns">
+          <button class="vbtn c" onclick="setVisitor('client',this)"><span class="vbtn-icon">🧑</span>Клиент</button>
+          <button class="vbtn y" onclick="setVisitor('yandex',this)"><span class="vbtn-icon">🚕</span>Курьер Яндекс</button>
+          <button class="vbtn o" onclick="setVisitor('our',this)"><span class="vbtn-icon">🚛</span>Наш курьер</button>
+        </div>
+      </div>
+
+      <div style="margin-bottom:6px">
+        <label class="flbl">Заказы в визите <span style="font-weight:500;letter-spacing:0;text-transform:none;color:var(--muted)">(выберите ниже)</span></label>
+        <div class="added-orders-list" id="addedOrdersList">
+          <span class="ao-empty">Заказы не выбраны</span>
+        </div>
+        <select id="orderSel" style="display:none" onchange="onOrderChange()">
+          <option value="">— выберите заказ —</option>
+        </select>
+      </div>
+
+      <div class="op-section" id="opSection" style="margin-bottom:7px">
+        <label class="flbl">Операция <span style="font-weight:500;letter-spacing:0;text-transform:none;color:var(--muted)">(для «нет в списке»)</span></label>
+        <div class="opg" id="opGroup"></div>
+      </div>
+
+      <div class="tc2-row">
+        <div class="tc2-time-row">
+          <label class="flbl">Время (МСК)</label>
+          <input class="time-inp" id="timeInp" type="time">
+          <span class="date-compact-lbl" id="dateLbl" onclick="toggleDatePicker()" style="margin-left:6px">📅 <span id="dateLblText">—</span> ✏️</span>
+          <div class="date-compact-picker" id="datePicker" style="display:none;position:absolute;z-index:10;background:var(--card);border:1px solid var(--rule);border-radius:9px;padding:6px;margin-top:2px">
+            <select class="date-sel" id="dateInp" onchange="onDateChange()"></select>
+          </div>
+        </div>
+        <div class="field-g">
+          <label class="flbl">Комментарий</label>
+          <input type="text" class="comment-inp" id="commentInp" placeholder="необязательно...">
+        </div>
+      </div>
+
+      <button class="add-btn" id="addBtn" onclick="addVisit()" disabled>＋ Добавить визит</button>
+
+      <div class="order-tap-list" id="orderTapList" style="margin-top:10px"></div>
+    </div>
+  </div>
+
+  <!-- ── ТАБ 2: СТАТУСЫ ВСЕХ ЗАКАЗОВ ── -->
+  <div class="tabview" id="tv-orders">
+    <div class="orders-tab-content" style="padding-bottom:20px">
+      <div class="osummary" id="ordersMini"></div>
+      <div id="ordersCards"></div>
+    </div>
+  </div>
+
+  <!-- ── ТАБ 3: СМЕНА ── -->
+  <div class="tabview" id="tv-shift">
+    <!-- Инфо о смене -->
+    <div style="margin:12px 15px 0">
+      <div style="background:var(--card);border:1px solid var(--rule);border-radius:12px;padding:13px 16px">
+        <div style="font-size:9px;font-weight:700;letter-spacing:.17em;text-transform:uppercase;color:var(--muted);margin-bottom:5px">Текущая смена</div>
+        <div id="shiftInfoCard" style="font-size:14px;font-weight:700;color:var(--black)">—</div>
+        <div id="shiftInfoSub" style="font-size:11px;color:var(--muted);margin-top:2px">—</div>
+      </div>
+    </div>
+
+    <!-- Журнал визитов смены -->
+    <div class="tarea">
+      <div class="tarea-hd">
+        Визиты смены
+        <span class="tarea-cnt" id="tarea-cnt"></span>
+      </div>
+      <table class="ltbl">
+        <thead><tr>
+          <th>Дата/Время</th><th>Кто</th><th>Операция</th><th>Заказы</th><th style="font-size:8px;color:var(--light)">Внесено</th><th class="act"></th>
+        </tr></thead>
+        <tbody id="logBody"></tbody>
+      </table>
+      <div class="empty-st" id="emptySt">
+        <div class="empty-st-ico">📋</div>
+        <div class="empty-st-txt">Добавьте первый визит смены</div>
+      </div>
+    </div>
+
+    <div class="sub-footer">
+      <button class="sub-btn" id="subBtn" onclick="openModal()">Закрыть смену ✓</button>
+      <div class="sub-hint" id="subHint">Визитов за смену: 0</div>
+    </div>
+  </div>
+</div><!-- /s-shift -->
+
+<!-- SUCCESS -->
+<div class="suc-screen" id="s-success">
+  <div class="suc-ring">✓</div>
+  <div class="suc-h">Смена закрыта!</div>
+  <div class="suc-sub" id="sucSub">—</div>
+  <div class="suc-sum" id="sucSum"></div>
+  <button class="btn-again" onclick="resetAll()">Начать новую смену</button>
+  <button class="btn-again" style="background:var(--card);color:var(--black);border:2px solid var(--rule);margin-top:10px" onclick="viewOrdersAfterShift()">👀 Заказы в режиме просмотра</button>
+</div>
+
+<script src="config.js"></script>
+<script>
+// ═══════════════════
+// URL берётся из файла config.js (лежит рядом с этим файлом)
+const MSK_OFFSET  = 3;
+const NIGHT_START = 22, NIGHT_END = 9;
+// DRAFT_KEY убран — используем draftKey() который зависит от имени кладовщика
+const AUTOSAVE_INT= 15000;
+const ICONS = ['👩','👨','🧑','👩','👩','👨'];
+const DAYS_SHORT  = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+// ═══════════════════
+
+const OPS_ALL = [{id:'issue',label:'📦 Выдача'},{id:'return',label:'🔄 Возврат'}];
+const OPS = {client:OPS_ALL,yandex:OPS_ALL,our:OPS_ALL};
+const VIS_LBL = {client:'Клиент',yandex:'Яндекс',our:'Наш курьер'};
+const OP_LBL  = {issue:'Выдача',return:'Возврат',pickup:'Выдача',dropoff:'Возврат',both:'Выдача и возврат'};
+
+let workers=[], orders=[], visits=[];
+let worker=null, visitor=null, operation=null, shiftStart=null;
+let viewOnlyMode=false;
+let personalWorkerUrl=null; // имя из ?worker= параметра, null если общая ссылка
+let pendingOrders=[];
+let autosaveTimer=null, formOpen=true, currentShiftTab='add';
+let hasOther=false;
+let serverIssuedToday   = new Set();
+let serverReturnedToday = new Set();
+let serverIssuedBy   = {};  // orderId → workerName
+let serverReturnedBy = {};
+let serverOtherVisits = [];  // визиты «не из списка» из лога
+
+// Ключ localStorage зависит от кладовщика — чтобы у каждого своё хранилище
+function draftKey(){ return worker ? 'wh_draft_'+worker.replace(/\s+/g,'_') : 'wh_draft'; }
+function authKey(w){ return 'wh_auth_'+w.replace(/\s+/g,'_'); }
+
+// Экранирование для вставки в HTML (ID заказов и имена клиентов приходят из таблицы)
+function esc(s){ return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+// Экранирование для подстановки в JS-строку внутри onclick-атрибута
+function jsq(s){ return esc(String(s??'').replace(/\\/g,'\\\\').replace(/'/g,"\\'")); }
+
+// ── INIT ──
+async function init(){
+  updatePill(); setInterval(updatePill,60000);
+  renderDateLine(); populateDatePicker();
+  flushPendingVisits(); // дослать визиты, не ушедшие в прошлый раз из-за сети
+
+  // Проверяем URL-параметр ?worker=Имя
+  const urlWorker = new URLSearchParams(location.search).get('worker');
+
+  // Один запрос к серверу — с именем кладовщика если есть (чтобы получить его черновик)
+  const serverDraft = await loadData(urlWorker || null);
+  renderWorkers(); populateOrders();
+  document.getElementById('loadingScr').style.display='none';
+
+  if(urlWorker){
+    const found = workers.find(w=>w.name.trim()===urlWorker.trim());
+    if(found){
+      personalWorkerUrl = found.name;
+      worker = found.name;
+      // Ищем черновик: сначала localStorage, затем с сервера
+      const draftRaw = localStorage.getItem(draftKey())
+        || (serverDraft ? JSON.stringify(serverDraft) : null);
+
+      if(draftRaw){
+        try{
+          const d = JSON.parse(draftRaw);
+          if(d.visits){
+            const hoursSince = (Date.now() - new Date(d.savedAt)) / 3600000;
+            if(hoursSince < 12){
+              restoreShiftDirect(d);
+            } else {
+              showOldShiftScreen(d);
+            }
+            return;
+          }
+        }catch(e){ localStorage.removeItem(draftKey()); }
+      }
+      // Нет черновика → welcome
+      showWelcomeScreen(found);
+      return;
+    }
+  }
+
+  // Нет личной ссылки (или имя не найдено) → режим просмотра
+  enterViewOnly();
+}
+
+// ── WELCOME ──
+function showWelcomeScreen(workerObj){
+  const ICONS_MAP = ['👩','👨','🧑','👩','👩','👨'];
+  const idx = workers.indexOf(workerObj);
+  document.getElementById('wlcAvatar').textContent = ICONS_MAP[idx%ICONS_MAP.length]||'👤';
+  document.getElementById('wlcName').textContent = workerObj.name;
+  document.getElementById('wlcDate').textContent =
+    new Date().toLocaleDateString('ru',{weekday:'long',day:'numeric',month:'long',timeZone:'Europe/Moscow'});
+  showScreen('s-welcome');
+}
+
+function welcomeStartShift(){
+  startShift();
+}
+
+function enterViewOnly(){
+  viewOnlyMode=true;
+  // Текст баннера зависит от типа ссылки
+  const banner=document.getElementById('voBanner');
+  if(personalWorkerUrl){
+    banner.innerHTML=`<span class="vo-banner-txt">👀 Только просмотр — добавление визитов недоступно</span>
+      <button class="vo-start-btn" onclick="startShiftFromViewOnly()">Начать смену →</button>`;
+  } else {
+    banner.innerHTML=`<span class="vo-banner-txt">👀 Только просмотр — для работы откройте личную ссылку</span>`;
+  }
+  banner.style.display='flex';
+  document.getElementById('stab-add').style.display='none';
+  document.getElementById('stab-shift').style.display='none';
+  document.getElementById('shiftWho').innerHTML=(worker||'Склад')+`<span>· просмотр</span>`;
+  showScreen('s-shift');
+  switchShiftTab('orders');
+  startOrdersRefresh();
+  updateOrdersBar();
+  renderOrderCards();
+}
+
+function exitViewOnly(){
+  viewOnlyMode=false;
+  document.getElementById('voBanner').style.display='none';
+  document.getElementById('stab-add').style.display='';
+  document.getElementById('stab-shift').style.display='';
+}
+
+function welcomeViewOnly(){
+  enterViewOnly();
+}
+
+// Кнопка «Заказы в режиме просмотра» на экране успеха
+function viewOrdersAfterShift(){
+  // worker уже известен, данные уже загружены
+  enterViewOnly();
+}
+
+// Кнопка «Начать смену →» из баннера просмотра
+function startShiftFromViewOnly(){
+  exitViewOnly();
+  // Если пришли с персональной ссылки — сразу начинаем смену
+  if(worker){
+    startShift();
+  } else {
+    showScreen('s-worker');
+  }
+}
+
+// Moscow time helpers
+function mskNow(){ return new Date(Date.now()+MSK_OFFSET*3600000); }
+function mskHour(){ return mskNow().getUTCHours(); }
+function isNight(){ const h=mskHour(); return h>=NIGHT_START||h<NIGHT_END; }
+// Определяет день/ночь по конкретному моменту (например, начало смены)
+function isNightAt(date){ const h=(date.getUTCHours()+MSK_OFFSET)%24; return h>=NIGHT_START||h<NIGHT_END; }
+// Считает дневные и ночные часы смены (ночь 22:00–09:00 МСК)
+function calcShiftHours(startISO, endISO){
+  if(!startISO||!endISO) return {total:0,night:0,day:0};
+  const start=new Date(startISO), end=new Date(endISO);
+  const totalMs=end-start;
+  if(totalMs<=0) return {total:0,night:0,day:0};
+  let nightMs=0;
+  const cur=new Date(start);
+  while(cur<end){
+    const next=new Date(Math.min(cur.getTime()+3600000,end.getTime()));
+    const h=(cur.getUTCHours()+MSK_OFFSET)%24;
+    if(h>=NIGHT_START||h<NIGHT_END) nightMs+=next-cur;
+    cur.setTime(next.getTime());
+  }
+  const total=Math.round(totalMs/3600000*10)/10;
+  const night=Math.round(nightMs/3600000*10)/10;
+  return {total, night, day:Math.round((total-night)*10)/10};
+}
+// Возвращает ЧЧ:ММ МСК для любого Date объекта
+function toMskTime(date){ return pad((date.getUTCHours()+MSK_OFFSET)%24)+':'+pad(date.getUTCMinutes()); }
+function nowTime(){ const n=mskNow(); return pad(n.getUTCHours())+':'+pad(n.getUTCMinutes()); }
+function pad(n){ return String(n).padStart(2,'0'); }
+function todayMsk(){ return mskNow().toISOString().split('T')[0]; }
+
+function updatePill(){
+  const p=document.getElementById('pill');
+  p.className='pill '+(isNight()?'night':'day');
+  p.textContent=isNight()?'🌙 Ночь':'☀️ День';
+}
+function renderDateLine(){
+  document.getElementById('dateLine').textContent=
+    new Date().toLocaleDateString('ru',{weekday:'long',day:'numeric',month:'long',timeZone:'Europe/Moscow'})+
+    ' · '+(isNight()?'Ночная смена':'Дневная смена');
+}
+function populateDatePicker(){
+  const sel=document.getElementById('dateInp');
+  if(!sel) return;
+  sel.innerHTML='';
+  const today=mskNow();
+  for(let i=0;i<4;i++){
+    const d=new Date(today.getTime()-i*864e5);
+    const opt=document.createElement('option');
+    opt.value=d.toISOString().split('T')[0];
+    const dy=DAYS_SHORT[d.getUTCDay()];
+    const ds=d.toLocaleDateString('ru',{day:'numeric',month:'short',timeZone:'UTC'});
+    opt.textContent=`${dy}, ${ds}`;
+    if(i===0)opt.selected=true;
+    sel.appendChild(opt);
+  }
+  updateDateLabel();
+}
+function updateDateLabel(){
+  const sel=document.getElementById('dateInp');
+  const lbl=document.getElementById('dateLblText');
+  if(!sel||!lbl) return;
+  lbl.textContent=sel.options[sel.selectedIndex]?.textContent||'—';
+}
+function toggleDatePicker(){
+  const p=document.getElementById('datePicker');
+  if(p) p.style.display=p.style.display==='none'?'block':'none';
+}
+function onDateChange(){
+  updateDateLabel();
+  // close picker after picking
+  const p=document.getElementById('datePicker');
+  if(p) p.style.display='none';
+}
+function showToast(msg, color){
+  const t=document.getElementById('toast');
+  if(!t) return;
+  t.textContent=msg;
+  t.style.borderColor=color||'var(--accent)';
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'),2200);
+}
+
+// ── LOAD ──
+async function loadData(workerParam){
+  if(SCRIPT_URL.includes('YOUR_')){
+    workers=[]; // имена берутся только из Google Sheets
+    orders=demoOrders();
+    return null;
+  }
+  try{
+    const wp = workerParam ? '&worker='+encodeURIComponent(workerParam) : '';
+    const j=await WHApi.getData(workerParam);
+    workers=j.workers||[]; orders=j.orders||[];
+    serverIssuedToday   = new Set(j.processedOrders?.issued   || []);
+    serverReturnedToday = new Set(j.processedOrders?.returned || []);
+    serverIssuedBy   = j.processedOrders?.issuedBy   || {};
+    serverReturnedBy = j.processedOrders?.returnedBy || {};
+    serverOtherVisits = j.processedOrders?.otherVisits || [];
+    return j.draft || null; // черновик этого кладовщика с сервера
+  }catch(e){
+    workers=[]; // имена берутся только из Google Sheets
+    orders=[];
+    return null;
+  }
+}
+
+function demoOrders(){
+  const d=p=>{const dt=new Date();dt.setDate(dt.getDate()+p);return dt.toLocaleDateString('ru',{day:'numeric',month:'short'})};
+  return[
+    {id:'A-4521',client:'Иванова Мария',returnDate:d(3),delivery:'Наша доставка',status:'pending',type:'issue'},
+    {id:'A-4522',client:'Петров Александр',returnDate:d(0),delivery:'Самовывоз',status:'pending',type:'return'},
+    {id:'A-4523',client:'Сидорова Анна',returnDate:d(5),delivery:'Наша доставка',status:'pending',type:'issue'},
+    {id:'B-1034',client:'Козлов Дмитрий',returnDate:d(0),delivery:'Самовывоз',status:'pending',type:'return'},
+    {id:'B-1035',client:'Новикова Елена',returnDate:d(7),delivery:'Самовывоз',status:'pending',type:'issue'},
+  ];
+}
+
+// ── DRAFT ──
+function saveDraft(){
+  if(!worker) return;
+  const draft={worker,shiftStart:shiftStart?.toISOString()||null,visits,isNight:isNight()?'Ночь':'День',savedAt:new Date().toISOString()};
+  localStorage.setItem(draftKey(),JSON.stringify(draft));
+  if(!SCRIPT_URL.includes('YOUR_')){
+    WHApi.saveDraft({...draft,isDraft:true,shiftDate:new Date().toLocaleDateString('ru'),totalEntries:visits.length,entries:visits}).catch(()=>{});
+  }
+}
+function startAutosave(){ stopAutosave(); autosaveTimer=setInterval(saveDraft,AUTOSAVE_INT); }
+function stopAutosave(){ if(autosaveTimer){clearInterval(autosaveTimer);autosaveTimer=null;} }
+
+// Проверяет черновик из localStorage ИЛИ с сервера (serverDraft)
+function checkForDraft(serverDraft){
+  const raw = localStorage.getItem(draftKey()) || (serverDraft ? JSON.stringify(serverDraft) : null);
+  if(!raw) return false;
+  try{
+    const d=JSON.parse(raw);
+    if(!d.worker||!d.visits?.length) return false;
+    const hrs=Math.round((Date.now()-new Date(d.savedAt))/360000)/10;
+    const el=document.getElementById('restoreBanner');
+    document.getElementById('restoreInfo').textContent=`${d.visits.length} ${pl(d.visits.length,'визит','визита','визитов')} · ${hrs} ч. назад`;
+    el.classList.add('show'); el.dataset.draft=raw;
+    return true;
+  }catch(e){ localStorage.removeItem(draftKey()); return false; }
+}
+function restoreShift(){
+  const raw=document.getElementById('restoreBanner').dataset.draft;
+  if(!raw) return;
+  const draft=JSON.parse(raw);
+  worker=draft.worker; visits=draft.visits||[];
+  shiftStart=draft.shiftStart?new Date(draft.shiftStart):new Date();
+  document.getElementById('restoreBanner').classList.remove('show');
+  document.getElementById('shiftWho').innerHTML=worker+`<span>· восстановлено</span>`;
+  updateShiftInfoCard();
+  showScreen('s-shift');
+  switchShiftTab('add');
+  pendingOrders=[]; renderPendingOrders();
+  setVisitor('client',document.querySelector('.vbtn.c'));
+  document.getElementById('timeInp').value=nowTime();
+  renderTable(); updateOrdersBar(); renderOrderCards();
+  startAutosave();
+}
+function discardDraft(){ localStorage.removeItem(draftKey()); document.getElementById('restoreBanner').classList.remove('show'); }
+
+// ── PIN ──
+let pinBuffer='', pinWorkerObj=null;
+
+function showPinScreen(workerObj){
+  pinWorkerObj=workerObj;
+  pinBuffer='';
+  document.getElementById('pinWorkerName').textContent=workerObj.name;
+  document.getElementById('pinError').textContent='';
+  updatePinDots();
+  showScreen('s-pin');
+}
+
+function pinKey(digit){
+  if(pinBuffer.length>=4) return;
+  pinBuffer+=digit;
+  updatePinDots();
+  if(pinBuffer.length===4) setTimeout(checkPin,120);
+}
+
+function pinDel(){
+  pinBuffer=pinBuffer.slice(0,-1);
+  updatePinDots();
+  document.getElementById('pinError').textContent='';
+}
+
+function updatePinDots(){
+  for(let i=0;i<4;i++){
+    document.getElementById('pd'+i).classList.toggle('filled',i<pinBuffer.length);
+  }
+}
+
+function checkPin(){
+  const correctPin = pinWorkerObj?.pin || '';
+  if(pinBuffer===correctPin){
+    localStorage.setItem(authKey(pinWorkerObj.name),'1');
+    worker=pinWorkerObj.name;
+    afterAuth();
+  } else {
+    pinBuffer='';
+    updatePinDots();
+    document.getElementById('pinError').textContent='Неверный PIN, попробуйте ещё раз';
+  }
+}
+
+function pinChangeWorker(){
+  worker=null; pinWorkerObj=null; pinBuffer='';
+  // Убираем URL-параметр чтобы вернуться к выбору
+  history.replaceState(null,'',location.pathname);
+  showScreen('s-worker');
+}
+
+// ── RESTORE DIRECT (без баннера, для персональной ссылки) ──
+function restoreShiftDirect(draft){
+  visits=draft.visits||[];
+  shiftStart=draft.shiftStart?new Date(draft.shiftStart):new Date();
+  localStorage.setItem(draftKey(), JSON.stringify(draft));
+  document.getElementById('shiftWho').innerHTML=worker+`<span>· восстановлено</span>`;
+  updateShiftInfoCard();
+  showScreen('s-shift');
+  switchShiftTab('add');
+  pendingOrders=[]; renderPendingOrders();
+  setVisitor('client',document.querySelector('.vbtn.c'));
+  document.getElementById('timeInp').value=nowTime();
+  renderTable(); updateOrdersBar(); renderOrderCards();
+  startAutosave(); startOrdersRefresh();
+}
+
+// ── OLD SHIFT SCREEN (смена > 12ч) ──
+function showOldShiftScreen(draft){
+  window._oldDraft = draft;
+  const start = new Date(draft.shiftStart||draft.savedAt);
+  const msk = new Date(start.getTime()+3*3600000);
+  const dateStr = start.toLocaleDateString('ru',{day:'numeric',month:'long',timeZone:'Europe/Moscow'});
+  const timeStr = pad(msk.getUTCHours())+':'+pad(msk.getUTCMinutes());
+  document.getElementById('oldShiftWorker').textContent = worker;
+  document.getElementById('oldShiftInfo').textContent =
+    `Смена от ${dateStr}, ${timeStr} · ${draft.visits?.length||0} ${pl(draft.visits?.length||0,'визит','визита','визитов')}`;
+  document.getElementById('oldShiftCloseLabel').textContent = `Закрыть смену от ${dateStr}`;
+  showScreen('s-old-shift');
+}
+
+function closeOldShift(){
+  const draft = window._oldDraft; if(!draft) return;
+  restoreShiftDirect(draft);
+  // Даём время на рендер, потом открываем модалку закрытия
+  setTimeout(openModal, 200);
+}
+
+function continueOldShift(){
+  const draft = window._oldDraft; if(!draft) return;
+  restoreShiftDirect(draft);
+}
+
+// ── WORKERS ──
+function renderWorkers(){
+  document.getElementById('wgrid').innerHTML=workers.map((w,i)=>`
+    <button class="wbtn" onclick="selWorker('${jsq(w.name)}',this)">
+      <div class="wava">${ICONS[i%ICONS.length]}</div>
+      <div class="wname">${w.name}</div>
+      <div class="wchk">✓</div>
+    </button>`).join('');
+}
+function selWorker(name,el){
+  document.querySelectorAll('.wbtn').forEach(b=>b.classList.remove('sel'));
+  el.classList.add('sel'); worker=name;
+  document.getElementById('startBtn').disabled=false;
+  // Если уже авторизован на этом устройстве — не спрашиваем PIN повторно
+  // PIN спросим только при первом нажатии Start
+}
+function startShift(){
+  // PIN ОТКЛЮЧЁН
+  // if(worker && localStorage.getItem(authKey(worker))!=='1'){
+  //   const workerObj = workers.find(w=>w.name===worker);
+  //   if(workerObj){ showPinScreen(workerObj); return; }
+  // }
+  shiftStart=new Date();
+  document.getElementById('shiftWho').innerHTML=worker+`<span>· ${nowTime()} МСК</span>`;
+  updateShiftInfoCard();
+  showScreen('s-shift');
+  switchShiftTab('add');
+  pendingOrders=[]; renderPendingOrders();
+  setVisitor('client',document.querySelector('.vbtn.c'));
+  document.getElementById('timeInp').value=nowTime();
+  updateDateLabel();
+  refreshOrdersFromServer().then(()=>{ updateOrdersBar(); renderOrderCards(); });
+  saveDraft();
+  startAutosave();
+  startOrdersRefresh();
+}
+
+function updateShiftInfoCard(){
+  const el=document.getElementById('shiftInfoCard');
+  const sub=document.getElementById('shiftInfoSub');
+  if(!el) return;
+  el.textContent=worker+(shiftStart?` · с ${pad(new Date(shiftStart.getTime()+3*3600000).getUTCHours())+':'+pad(new Date(shiftStart.getTime()+3*3600000).getUTCMinutes())} МСК`:'');
+  if(sub) sub.textContent=(shiftStart?isNightAt(shiftStart):isNight())?'🌙 Ночная смена':'☀️ Дневная смена';
+}
+
+// ── SHIFT TABS ──
+function switchShiftTab(tab){
+  currentShiftTab=tab;
+  document.querySelectorAll('.stab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('stab-'+tab).classList.add('active');
+  document.querySelectorAll('.tabview').forEach(v=>v.classList.remove('active'));
+  document.getElementById('tv-'+tab).classList.add('active');
+}
+
+function populateOrders(){
+  // Keep hidden select in sync for any legacy code
+  const sel=document.getElementById('orderSel');
+  sel.innerHTML='<option value="">— выберите заказ —</option>';
+
+  const {issuedIds, returnedIds}=getSessionStatuses();
+
+  const toIssue  = orders.filter(o=>!o.overdue && getEffectiveOrderType(o,issuedIds,returnedIds)==='issue');
+  const toReturn = orders.filter(o=>!o.overdue && getEffectiveOrderType(o,issuedIds,returnedIds)==='return');
+  // sameDay заказы которые ещё не выдали — показываем в "К возврату" как заблокированные
+  const sameDayPending = orders.filter(o=>!o.overdue && o.sameDay && getEffectiveOrderType(o,issuedIds,returnedIds)==='issue');
+  const overdue  = orders.filter(o=>o.overdue  && getEffectiveOrderType(o,issuedIds,returnedIds)!=='done');
+
+  // Build tap-list
+  const tl=document.getElementById('orderTapList');
+  let html='';
+
+  if(overdue.length){
+    html+=`<div class="otap-sep">🔴 Просрочены</div>`;
+    html+=overdue.map(o=>tapRow(o,'ov')).join('');
+  }
+  if(toIssue.length){
+    html+=`<div class="otap-sep">📦 К выдаче</div>`;
+    html+=toIssue.map(o=>tapRow(o,'issue',false,'issue')).join('');
+  }
+  if(toReturn.length||sameDayPending.length){
+    html+=`<div class="otap-sep">🔄 К возврату</div>`;
+    html+=sameDayPending.map(o=>tapRow(o,'ret',true)).join('');
+    html+=toReturn.map(o=>tapRow(o,'ret',false,'return')).join('');
+  }
+  html+=`<div class="otap otap-other" id="otap-__other__" onclick="tapOrder('__other__')">
+    <div class="otap-left"><div class="otap-id">⚠️ Нет в списке</div></div>
+    <div class="otap-check" id="otap-chk-__other__"></div>
+  </div>`;
+  tl.innerHTML=html;
+
+  updateTapSelections();
+}
+
+function tapRow(o, badgeCls, locked, forceType){
+  const label=badgeCls==='issue'?'Выдача':badgeCls==='ret'?'Возврат':'🔴 Просрочен';
+  const rowId=locked?`otap-ret-${o.id}`:`otap-${o.id}`;
+  const chkId=locked?`otap-chk-ret-${o.id}`:`otap-chk-${o.id}`;
+  const clickAttr=locked?'style="opacity:0.4;pointer-events:none"':`onclick="tapOrder('${jsq(o.id)}'${forceType?`,'${forceType}'`:''})"`;
+  const hint=locked?`<span style="font-size:10px;color:#888;margin-left:4px">— сначала выдайте</span>`:'';
+  return `<div class="otap" id="${rowId}" ${clickAttr}>
+    <div class="otap-left">
+      <div class="otap-id">${esc(o.id)}${hint}</div>
+      <div class="otap-client">${esc(o.client||'')}</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:7px">
+      <span class="otap-badge ${badgeCls}">${label}</span>
+      <div class="otap-check" id="${chkId}"></div>
+    </div>
+  </div>`;
+}
+
+function tapOrder(id, forceType){
+  const already=pendingOrders.find(o=>o.id===id);
+  if(already){
+    // deselect
+    removeOrderFromPending(id);
+    return;
+  }
+  let order;
+  if(id==='__other__'){
+    order={id:'__other__',client:'нет в списке',type:null};
+    hasOther=true;
+  } else {
+    const found=orders.find(o=>o.id===id);
+    // Для sameDay: берём эффективный тип из текущей сессии, а не статичный o.type
+    let effectiveType = found?.type || null;
+    if(found?.sameDay && !forceType){
+      const {issuedIds,returnedIds}=getSessionStatuses();
+      effectiveType=getEffectiveOrderType(found,issuedIds,returnedIds);
+      if(effectiveType==='done') effectiveType='return';
+    }
+    if(forceType) effectiveType=forceType;
+    order=found
+      ?{id:found.id,client:found.client||'',type:effectiveType,sameDay:found.sameDay||false,returnDate:found.returnDate||'',delivery:found.delivery||''}
+      :{id,client:'',type:forceType||null};
+  }
+  pendingOrders.push(order);
+  renderPendingOrders();
+  document.getElementById('opSection').classList.toggle('show',hasOther);
+  if(hasOther) renderOps();
+  updateTapSelections();
+  checkReady();
+}
+
+function updateTapSelections(){
+  document.querySelectorAll('.otap').forEach(el=>{
+    const id=el.id?.replace('otap-','');
+    const chk=el.querySelector('.otap-check');
+    const isSel=pendingOrders.some(o=>o.id===id);
+    el.classList.toggle('sel',isSel);
+    if(chk) chk.textContent=isSel?'✓':'';
+  });
+}
+
+
+// ── AUTO-REFRESH ORDERS from server every 60s ──
+let ordersRefreshTimer=null;
+function startOrdersRefresh(){
+  stopOrdersRefresh();
+  ordersRefreshTimer=setInterval(refreshOrdersFromServer, 15000);
+}
+function stopOrdersRefresh(){ if(ordersRefreshTimer){clearInterval(ordersRefreshTimer);ordersRefreshTimer=null;} }
+
+// Недавно удалённые визиты: сервер обрабатывает deleteVisit асинхронно (no-cors),
+// и ближайший refresh мог вернуть заказ обратно («мигание»). Помним удалённое 90 сек.
+let recentlyDeletedOrders=new Map(); // orderId → ts удаления
+let recentlyDeletedOther =new Map(); // time визита «не из списка» → ts удаления
+function applyRecentDeletions(){
+  const cutoff=Date.now()-90000;
+  recentlyDeletedOrders.forEach((ts,id)=>{
+    if(ts<cutoff){ recentlyDeletedOrders.delete(id); return; }
+    serverIssuedToday.delete(id); serverReturnedToday.delete(id);
+  });
+  recentlyDeletedOther.forEach((ts,t)=>{
+    if(ts<cutoff){ recentlyDeletedOther.delete(t); return; }
+    serverOtherVisits=serverOtherVisits.filter(v=>v.time!==t);
+  });
+}
+
+async function refreshOrdersFromServer(){
+  if(SCRIPT_URL.includes('YOUR_')) return;
+  try{
+    const j=await WHApi.getData(null);
+    if(j.orders){
+      orders=j.orders;
+      serverIssuedToday   = new Set(j.processedOrders?.issued   || []);
+      serverReturnedToday = new Set(j.processedOrders?.returned || []);
+      serverOtherVisits = j.processedOrders?.otherVisits || [];
+      applyRecentDeletions();
+      populateOrders();
+      updateOrdersBar();
+      renderOrderCards();
+    }
+    flushPendingVisits(); // сеть точно есть — дошлём то, что копилось оффлайн
+  }catch(e){ /* silent fail */ }
+}
+
+// Возвращает эффективный тип заказа с учётом однодневной аренды:
+//   'issue'    → нужно выдать
+//   'return'   → нужно принять возврат
+//   'done'     → полностью обработан
+function getEffectiveOrderType(o, issuedIds, returnedIds){
+  if(o.sameDay){
+    // Однодневная аренда: выдача → возврат → готово
+    if(returnedIds.has(o.id)) return 'done';
+    if(issuedIds.has(o.id))   return 'return'; // уже выдан — ждём возврат
+    return 'issue'; // ещё не выдан
+  }
+  // Обычный заказ
+  if(o.type==='issue'  && issuedIds.has(o.id))   return 'done';
+  if(o.type==='return' && returnedIds.has(o.id))  return 'done';
+  return o.type;
+}
+
+// Объединяет: что обработано сегодня в логе (серверные данные) + текущая сессия
+function getSessionStatuses(){
+  const issuedIds   = new Set(serverIssuedToday);
+  const returnedIds = new Set(serverReturnedToday);
+  const issuedBy    = {...serverIssuedBy};
+  const returnedBy  = {...serverReturnedBy};
+  // Добавляем из текущей сессии («both» = выдача И возврат, как на сервере)
+  visits.forEach(v=>{
+    (v.orders||[]).forEach(o=>{
+      if(!o.id||o.id==='__other__') return;
+      if(['issue','pickup','both'].includes(v.operation))   { issuedIds.add(o.id);   issuedBy[o.id]   = worker; }
+      if(['return','dropoff','both'].includes(v.operation)) { returnedIds.add(o.id); returnedBy[o.id] = worker; }
+    });
+  });
+  return {issuedIds, returnedIds, issuedBy, returnedBy};
+}
+
+function onOrderChange(){
+  const sel=document.getElementById('orderSel');
+  const id=sel.value;
+  const info=document.getElementById('orderInfo');
+  const aoBtn=document.getElementById('aoAddBtn');
+  const opSec=document.getElementById('opSection');
+
+  if(!id){ info.classList.remove('show'); aoBtn.disabled=true; opSec.classList.remove('show'); checkReady(); return; }
+
+  if(id==='__other__'){
+    info.classList.remove('show'); aoBtn.disabled=false;
+    opSec.classList.add('show');
+    renderOps();
+    checkReady(); return;
+  }
+
+  opSec.classList.remove('show'); // Hide op buttons for list orders
+  const o=orders.find(x=>x.id===id);
+  if(o){
+    document.getElementById('oi-client').textContent=o.client||'—';
+    document.getElementById('oi-return').textContent=o.returnDate||'—';
+    document.getElementById('oi-delivery').textContent=o.delivery||'—';
+    info.classList.add('show');
+    // Auto-set operation from order type (sameDay: эффективный тип из сессии)
+    if(visitor){
+      let effT=o.type;
+      if(o.sameDay){const {issuedIds,returnedIds}=getSessionStatuses();const e=getEffectiveOrderType(o,issuedIds,returnedIds);effT=e==='done'?'return':e;}
+      const tOp=effT==='issue'?'issue':'return';
+      const valid=OPS[visitor]||[];
+      if(valid.find(op=>op.id===tOp)){
+        operation=tOp;
+        document.querySelectorAll('.opb').forEach(b=>{b.classList.remove('act','auto');if(b.dataset.op===tOp)b.classList.add('auto');});
+      }
+    }
+  }
+  aoBtn.disabled=false;
+  checkReady();
+}
+
+function addOrderToVisit(){
+  const sel = document.getElementById('orderSel');
+  const id  = sel.value;
+  if(!id) return;
+  if(pendingOrders.find(o => o.id === id)) return; // no duplicates
+
+  let order;
+  if(id === '__other__'){
+    order = {id:'__other__', client:'нет в списке', type:null};
+    hasOther = true;
+  } else {
+    // Find full order object from loaded orders list
+    const found = orders.find(o => o.id === id);
+    let effType = found?.type || null;
+    if(found?.sameDay){
+      const {issuedIds,returnedIds}=getSessionStatuses();
+      const e=getEffectiveOrderType(found,issuedIds,returnedIds);
+      effType = e==='done' ? 'return' : e;
+    }
+    order = found
+      ? {id: found.id, client: found.client||'', type: effType, sameDay: found.sameDay||false, returnDate: found.returnDate||'', delivery: found.delivery||''}
+      : {id, client:'', type:null};
+  }
+
+  pendingOrders.push(order);
+  renderPendingOrders();
+  sel.value = '';
+  document.getElementById('orderInfo').classList.remove('show');
+  document.getElementById('aoAddBtn').disabled = true;
+  // Show op buttons only if "other" is in list
+  document.getElementById('opSection').classList.toggle('show', hasOther);
+  if(hasOther) renderOps();
+  checkReady();
+}
+
+function removeOrderFromPending(id){
+  pendingOrders=pendingOrders.filter(o=>o.id!==id);
+  hasOther=pendingOrders.some(o=>o.id==='__other__');
+  if(!hasOther){ document.getElementById('opSection').classList.remove('show'); if(operation&&OPS[visitor]?.find(op=>op.id===operation)===undefined)operation=null; }
+  renderPendingOrders(); updateTapSelections(); checkReady();
+}
+
+function renderPendingOrders(){
+  const list=document.getElementById('addedOrdersList');
+  if(!pendingOrders.length){ list.innerHTML='<span class="ao-empty">Заказы не выбраны</span>'; return; }
+  list.innerHTML=pendingOrders.map(o=>`
+    <div class="ao-tag">
+      <span>${o.id==='__other__'?'⚠️ нет в списке':esc(o.id)}</span>
+      ${o.client&&o.id!=='__other__'?`<span class="ao-client">${esc(o.client)}</span>`:''}
+      <span class="ao-del" onclick="removeOrderFromPending('${jsq(o.id)}')">×</span>
+    </div>`).join('');
+}
+
+// ── VISITOR / OP ──
+function setVisitor(v,el){
+  visitor=v; operation=null;
+  document.querySelectorAll('.vbtn').forEach(b=>b.classList.remove('act'));
+  el.classList.add('act');
+  if(hasOther){ renderOps(); document.getElementById('opSection').classList.add('show'); }
+  const firstOrder=pendingOrders.find(o=>o.id&&o.id!=='__other__');
+  if(firstOrder&&firstOrder.type){ const tOp=firstOrder.type==='issue'?'issue':'return'; const valid=OPS[v]||[]; if(valid.find(op=>op.id===tOp)){operation=tOp;document.querySelectorAll('.opb').forEach(b=>{b.classList.remove('act','auto');if(b.dataset.op===tOp)b.classList.add('auto');});} }
+  checkReady();
+}
+function renderOps(){
+  document.getElementById('opGroup').innerHTML=(OPS[visitor]||[]).map(op=>
+    `<button class="opb" data-op="${op.id}" onclick="setOp('${op.id}',this)">${op.label}</button>`).join('');
+}
+function setOp(op,el){ operation=op; document.querySelectorAll('.opb').forEach(b=>b.classList.remove('act','auto')); el.classList.add('act'); checkReady(); }
+
+// Determine effective operation: derive from order types, no manual selection needed for list orders
+function getEffectiveOperation(){
+  const listOrders = pendingOrders.filter(o => o.id && o.id !== '__other__');
+  const hasOtherOrder = pendingOrders.some(o => o.id === '__other__');
+
+  // If only "other" orders — need manual op selection
+  if (!listOrders.length && hasOtherOrder) return operation || null;
+
+  if (!listOrders.length) return operation || null;
+
+  // Count issue vs return types among list orders (sameDay: берём эффективный тип из сессии)
+  const {issuedIds:_iids,returnedIds:_rids}=getSessionStatuses();
+  function _effType(o){ return o.sameDay?getEffectiveOrderType(o,_iids,_rids):o.type; }
+  const issueCount  = listOrders.filter(o => _effType(o) === 'issue').length;
+  const returnCount = listOrders.filter(o => _effType(o) === 'return').length;
+
+  if (issueCount > 0 && returnCount === 0) return 'issue';
+  if (returnCount > 0 && issueCount === 0) return 'return';
+  return 'issue'; // mixed — редкий случай, берём первую операцию
+}
+
+function checkReady(){
+  const selectedInDropdown = document.getElementById('orderSel').value;
+  const hasSelected = pendingOrders.length > 0 || (selectedInDropdown && selectedInDropdown !== '');
+  // If "other" is selected/in list — also need manual operation
+  const needsOp = hasOther || selectedInDropdown === '__other__';
+  const ready = visitor && hasSelected && (!needsOp || operation);
+  document.getElementById('addBtn').disabled = !ready;
+}
+
+// ── ADD VISIT ──
+function addVisit(){
+  // Auto-add order from dropdown if it wasn't added via ＋ button
+  const selId = document.getElementById('orderSel').value;
+  if(selId && !pendingOrders.find(o=>o.id===selId)){
+    addOrderToVisit();
+  }
+
+  const op=getEffectiveOperation()||operation;
+  if(!visitor||!op||!pendingOrders.length) return;
+  const timeVal=document.getElementById('timeInp').value||nowTime();
+  const dateVal=document.getElementById('dateInp').value;
+  const comment=document.getElementById('commentInp').value.trim();
+  // День/ночь — по указанному ВРЕМЕНИ визита, а не по моменту записи
+  // (визит могут вносить задним числом)
+  const hVal=parseInt((timeVal||'').split(':')[0],10);
+  const visitNight=isNaN(hVal)?isNight():(hVal>=NIGHT_START||hVal<NIGHT_END);
+
+  const visit={
+    n:visits.length+1,
+    visitor, operation:op,
+    orders:pendingOrders.map(o=>({id:o.id,client:o.client||'',returnDate:o.returnDate||'',delivery:o.delivery||''})),
+    // legacy compat
+    orderId:pendingOrders[0]?.id||null,
+    orderClient:pendingOrders[0]?.client||null,
+    orderReturnDate:pendingOrders[0]?.returnDate||null,
+    orderDelivery:pendingOrders[0]?.delivery||null,
+    comment:comment||null,
+    date:dateVal,
+    time:timeVal,
+    timeAuto:nowTime(),
+    dateAuto:todayMsk(),
+    ts:new Date().toISOString(),
+    night:visitNight,
+  };
+  visits.push(visit);
+  sendVisitNow(visit);
+  pendingOrders=[]; hasOther=false;
+  renderPendingOrders();
+  operation=null;
+  document.querySelectorAll('.opb').forEach(b=>b.classList.remove('act','auto'));
+  document.getElementById('opSection').classList.remove('show');
+  document.getElementById('orderSel').value='';
+  document.getElementById('commentInp').value='';
+  document.getElementById('timeInp').value=nowTime();
+  // Перестраиваем пикер дат: смена может перейти через полночь,
+  // и «сегодня» в старых options устаревает
+  populateDatePicker();
+  checkReady();
+  renderTable(); updateOrdersBar(); renderOrderCards();
+  populateOrders();
+  saveDraft();
+  showToast('✓ Визит записан', 'var(--client)');
+}
+
+// Немедленная отправка визита в Google Sheets (не ждёт закрытия смены)
+function sendVisitNow(visit){
+  if(SCRIPT_URL.includes('YOUR_')) return;
+  const entry={
+    visitor:visit.visitor, operation:visit.operation,
+    orders:visit.orders||[], orderId:visit.orderId||'', orderClient:visit.orderClient||'',
+    orderReturnDate:visit.orderReturnDate||'', orderDelivery:visit.orderDelivery||'',
+    comment:visit.comment||'', date:visit.date||'', time:visit.time, timeAuto:visit.timeAuto,
+    timestamp:visit.ts, night:visit.night?'Ночь':'День'
+  };
+  const n=mskNow();
+  const mskDate=pad(n.getUTCDate())+'.'+pad(n.getUTCMonth()+1)+'.'+n.getUTCFullYear();
+  postVisitPayload({
+    action:'addVisit',
+    shiftDate:mskDate,
+    shiftStart:shiftStart?shiftStart.toISOString():new Date().toISOString(),
+    shiftEnd:'',
+    // День/ночь смены — всегда от её НАЧАЛА (как при закрытии), иначе
+    // до закрытия смены в логе «плавающее» значение
+    worker, isNight:(shiftStart?isNightAt(shiftStart):isNight())?'Ночь':'День',
+    totalEntries:visits.length,
+    entry
+  });
+}
+
+// ── ОЧЕРЕДЬ НЕОТПРАВЛЕННЫХ ВИЗИТОВ (оффлайн) ──
+// no-cors отправка — fire-and-forget; если сети нет, fetch упадёт и визит
+// раньше молча терялся до закрытия смены. Теперь складываем в очередь и шлём повторно.
+const PENDING_KEY='wh_pending_visits';
+function postVisitPayload(payload){
+  WHApi.addVisit(payload)
+    .catch(()=>{ queuePendingVisit(payload); });
+}
+function queuePendingVisit(payload){
+  try{
+    const q=JSON.parse(localStorage.getItem(PENDING_KEY)||'[]');
+    q.push(payload);
+    localStorage.setItem(PENDING_KEY,JSON.stringify(q));
+    showToast('⚠️ Нет сети — визит будет отправлен позже','var(--yandex)');
+  }catch(e){}
+}
+function flushPendingVisits(){
+  let q=[];
+  try{ q=JSON.parse(localStorage.getItem(PENDING_KEY)||'[]'); }catch(e){}
+  if(!q.length) return;
+  localStorage.setItem(PENDING_KEY,'[]');
+  q.forEach(p=>postVisitPayload(p));
+}
+window.addEventListener('online',flushPendingVisits);
+
+// ── TABLE ──
+function renderTable(){
+  const tbody=document.getElementById('logBody');
+  const empty=document.getElementById('emptySt');
+  const cnt=document.getElementById('tarea-cnt');
+
+  const hint=visits.length
+    ? `${visits.length} ${pl(visits.length,'визит','визита','визитов')} за смену`
+    : 'Нет визитов — можно закрыть смену';
+  document.getElementById('subHint').textContent=hint;
+
+  if(!visits.length){
+    tbody.innerHTML=''; empty.style.display='block'; cnt.textContent='';
+    return;
+  }
+  empty.style.display='none';
+  cnt.textContent=visits.length+' '+pl(visits.length,'визит','визита','визитов');
+
+  const today=todayMsk();
+  // Separate active and done
+  const {issuedIds,returnedIds}=getSessionStatuses();
+  const isDoneVisit=v=>{
+    if(!v.orders||!v.orders.length) return false;
+    return v.orders.every(o=>o.id==='__other__'||issuedIds.has(o.id)||returnedIds.has(o.id));
+  };
+  const active=visits.filter(v=>!isDoneVisit(v));
+  const done=visits.filter(v=>isDoneVisit(v));
+
+  const rowHtml=v=>{
+    const showDate=v.date&&v.date!==today;
+    const dayName=v.date?DAYS_SHORT[new Date(v.date+'T12:00').getDay()]:'';
+    const datePart=showDate?`<span class="date-chip" style="color:var(--muted)">📅 ${dayName} ${new Date(v.date+'T12:00').toLocaleDateString('ru',{day:'numeric',month:'short'})}</span>`:
+      `<span class="date-chip" style="color:var(--light)">${DAYS_SHORT[new Date().getDay()]}</span>`;
+    const ords=v.orders||[];
+    const ordHtml=ords.length?`<div class="order-tags">`+ords.map(o=>{
+      if(o.id==='__other__') return`<div class="order-tag" style="background:rgba(255,107,53,.1);border-color:var(--yandex);color:var(--yandex)">⚠️ Заказ не из списка</div>`;
+      return`<div class="order-tag"><span>${esc(o.id)}</span>${o.client?`<span class="tag-client">${esc(o.client)}</span>`:''}</div>`;
+    }).join('')+`</div>`:`<span style="font-size:10px;color:var(--light)">—</span>`;
+    const commentHtml=v.comment?`<div style="font-size:10px;color:var(--muted);margin-top:3px;font-style:italic">💬 ${esc(v.comment)}</div>`:'';
+    return`<tr class="lrow${isDoneVisit(v)?' lrow-done':''}">
+      <td style="min-width:58px"><span class="time-chip">${v.time}</span>${datePart}</td>
+      <td><span class="tchip ${v.visitor}">${VIS_LBL[v.visitor]}</span></td>
+      <td><span class="ochip ${v.operation}">${OP_LBL[v.operation]}</span></td>
+      <td>${ordHtml}${commentHtml}</td>
+      <td><span class="time-rec">${v.timeAuto||'—'}</span></td>
+      <td><button class="dbtn" onclick="delVisit(${visits.indexOf(v)})">×</button></td>
+    </tr>`;
+  };
+
+  let html='';
+  active.forEach(v=>{ html+=rowHtml(v); });
+  if(done.length){
+    html+=`<tr class="tg-hdr"><td colspan="6">✓ Выдано / Возвращено (${done.length})</td></tr>`;
+    done.forEach(v=>{ html+=rowHtml(v); });
+  }
+  tbody.innerHTML=html;
+
+  document.getElementById('subBtn').disabled=false;
+  document.getElementById('subHint').textContent=`${visits.length} ${pl(visits.length,'визит','визита','визитов')} · готово к отправке`;
+  // Бейдж на табе «Смена»
+  const vb=document.getElementById('visitsBadge');
+  if(vb){ vb.textContent=visits.length; vb.style.display=visits.length?'inline-block':'none'; }
+}
+
+function delVisit(i){
+  const visit = visits[i];
+  if(!visit) return;
+
+  // Строим текст подтверждения
+  const realOrders = (visit.orders||[]).filter(o=>o.id&&o.id!=='__other__');
+  const hasOtherFlag = (visit.orders||[]).some(o=>o.id==='__other__');
+  const lines = [];
+  if(realOrders.length){
+    const isReturn = ['return','dropoff','both'].includes(visit.operation);
+    const action = isReturn ? 'возврат' : 'выдачу';
+    lines.push(`Заказ${realOrders.length>1?'ы':''} ${realOrders.map(o=>o.id).join(', ')} вернётся на ${action}.`);
+  }
+  if(hasOtherFlag) lines.push('Заказ не из списка будет удалён.');
+  const msg = `Удалить визит?\n${lines.join('\n')}`;
+  if(!confirm(msg)) return;
+
+  // Немедленно убираем из серверных наборов и запоминаем на 90 сек —
+  // чтобы refresh не вернул заказ, пока сервер не обработал deleteVisit
+  realOrders.forEach(o=>{
+    serverIssuedToday.delete(o.id);
+    serverReturnedToday.delete(o.id);
+    recentlyDeletedOrders.set(o.id, Date.now());
+  });
+  if(hasOtherFlag){
+    serverOtherVisits = serverOtherVisits.filter(v=>v.time !== visit.time);
+    recentlyDeletedOther.set(visit.time, Date.now());
+  }
+
+  // Отправляем удаление на сервер (fire-and-forget)
+  if(!SCRIPT_URL.includes('YOUR_') && shiftStart){
+    WHApi.deleteVisit({shiftStart:shiftStart.toISOString(),worker,timeAuto:visit.timeAuto||''}).catch(()=>{});
+  }
+
+  visits.splice(i,1);
+  visits.forEach((v,j)=>v.n=j+1);
+  renderTable(); updateOrdersBar(); renderOrderCards(); populateOrders(); saveDraft();
+}
+
+// ── ORDERS BAR ──
+// Объединяет «не из списка» визиты из сессии + сервера (без дублей по time)
+function getOtherVisits(){
+  const sessionOther = visits.filter(v=>(v.orders||[]).some(o=>o.id==='__other__'));
+  const sessionTimes = new Set(sessionOther.map(v=>v.time));
+  return [...sessionOther, ...serverOtherVisits.filter(v=>!sessionTimes.has(v.time))];
+}
+
+function updateOrdersBar(){
+  const {issuedIds,returnedIds}=getSessionStatuses();
+  let p=0,is=0,re=0,ov=0;
+  orders.forEach(o=>{
+    const eff=getEffectiveOrderType(o,issuedIds,returnedIds);
+    if(eff==='done')        { o.sameDay||o.type==='return' ? re++ : is++; }
+    else if(o.sameDay&&eff==='return') { is++; p++; } // выдан + ожидает возврата
+    else if(o.overdue)      ov++;
+    else                    p++;
+  });
+  // Добавляем «не из списка» визиты
+  getOtherVisits().forEach(v=>{
+    const isReturn=['return','dropoff','both'].includes(v.operation);
+    const isIssue =['issue','pickup','both'].includes(v.operation);
+    if(isReturn) re++;
+    else if(isIssue) is++;
+  });
+  document.getElementById('bar-pending').textContent=p;
+  document.getElementById('bar-issued').textContent=is;
+  document.getElementById('bar-returned').textContent=re;
+  const ovEl=document.getElementById('bar-overdue');
+  if(ovEl) ovEl.textContent=ov;
+  const badge=document.getElementById('pendingBadge');
+  if(p+ov>0){badge.style.display='inline-block';badge.textContent=p+ov;badge.className='stab-badge';}
+  else if(is+re>0){badge.style.display='inline-block';badge.textContent='✓';badge.className='stab-badge grn';}
+  else{badge.style.display='none';}
+}
+
+// Строим карту orderId → comment из визитов текущей сессии
+let _commentMap={};
+function buildCommentMap(){
+  _commentMap={};
+  visits.forEach(v=>{
+    if(!v.comment) return;
+    (v.orders||[]).forEach(o=>{ if(o.id&&o.id!=='__other__') _commentMap[o.id]=v.comment; });
+  });
+}
+
+// ── ORDER CARDS ──
+function renderOrderCards(){
+  buildCommentMap();
+  const {issuedIds,returnedIds,issuedBy,returnedBy}=getSessionStatuses();
+  const display=orders.map(o=>{
+    const eff=getEffectiveOrderType(o,issuedIds,returnedIds);
+    return{...o, eff, issuedBy:issuedBy[o.id]||null, returnedBy:returnedBy[o.id]||null};
+  });
+  const oc=display.filter(o=>o.overdue&&o.eff!=='done').length;
+  const pc=display.filter(o=>!o.overdue&&(o.eff==='issue'||o.eff==='return')).length;
+  const otherV=getOtherVisits();
+  const otherIc=otherV.filter(v=>['issue','pickup'].includes(v.operation)).length
+               +otherV.filter(v=>v.operation==='both').length;
+  const otherRc=otherV.filter(v=>['return','dropoff','both'].includes(v.operation)).length;
+  const ic=display.filter(o=>o.eff==='done'&&o.type==='issue'&&!o.sameDay).length
+         + display.filter(o=>o.eff==='return'&&o.sameDay).length // однодневка выдана, ждёт возврата
+         + otherIc;
+  const rc=display.filter(o=>o.eff==='done'&&(o.type==='return'||o.sameDay)).length
+         + otherRc;
+  document.getElementById('ordersMini').innerHTML=[
+    ['Ожидают','var(--pending)',pc],['Выдано','var(--issued)',ic],['Возвращено','var(--ret)',rc]
+  ].map(([l,c,n])=>`<div class="osc" style="border-top:2px solid ${c}"><div class="osc-l">${l}</div><div class="osc-n">${n}</div></div>`).join('');
+
+  const overdueOrders   = display.filter(o=>o.overdue && o.eff!=='done');
+  const pendingIssue    = display.filter(o=>o.eff==='issue' && !o.overdue);
+  // sameDay ещё не выданные — показываем и в "К возврату" (заблокированные)
+  const sameDayLocked   = display.filter(o=>o.sameDay && o.eff==='issue' && !o.overdue);
+  const pendingReturn   = display.filter(o=>o.eff==='return' && !o.overdue);
+  // sameDay выданные (eff==='return') — показываем и в "Выдано" с пометкой
+  const sameDayIssued   = display.filter(o=>o.sameDay && o.eff==='return' && !o.overdue);
+  const done            = display.filter(o=>o.eff==='done');
+
+  let html='';
+  if(overdueOrders.length){
+    html+=`<div class="sec-lbl" style="color:#E74C3C">🔴 Просрочены (${overdueOrders.length})</div>`;
+    html+=overdueOrders.map(o=>orderCard(o)).join('');
+  }
+  if(pendingIssue.length){
+    html+=`<div class="sec-lbl">📦 К выдаче</div>`;
+    html+=pendingIssue.map(o=>orderCard(o)).join('');
+  }
+  if(pendingReturn.length||sameDayLocked.length){
+    html+=`<div class="sec-lbl">🔄 К возврату</div>`;
+    html+=sameDayLocked.map(o=>orderCard(o,'locked')).join('');
+    html+=pendingReturn.map(o=>orderCard(o)).join('');
+  }
+  // Визиты «не из списка»: из текущей сессии + с сервера (для режима просмотра)
+  const otherVisits = getOtherVisits();
+  const otherCards = otherVisits.map(v=>otherVisitCard(v)).join('');
+  const doneTotal = done.length + sameDayIssued.length + otherVisits.length;
+
+  if(doneTotal){
+    html+=`<div class="sec-lbl" style="color:var(--issued)">✓ Выдано / Возвращено (${doneTotal})</div>`;
+    html+=sameDayIssued.map(o=>orderCard(o,'sameday-issued')).join('');
+    html+=done.map(o=>orderCard(o)).join('');
+    html+=otherCards;
+  }
+
+  if(!orders.length && !otherVisits.length) html=`<div style="text-align:center;padding:32px;color:var(--light)"><div style="font-size:26px;margin-bottom:7px">📭</div><div style="font-size:13px;font-weight:600">Нет заказов на сегодня</div></div>`;
+  document.getElementById('ordersCards').innerHTML=html;
+}
+
+function orderCard(o, modifier){
+  const eff=o.eff||'issue';
+  const isOverdue=o.overdue&&eff!=='done';
+  const locked=modifier==='locked';
+  const sameDayIssued=modifier==='sameday-issued';
+  const isDoneReturn=eff==='done'&&(o.type==='return'||o.sameDay);
+  const cls=locked?'return-due':sameDayIssued?'issued':eff==='done'&&isDoneReturn?'returned':eff==='done'?'issued':eff==='return'?'return-due':isOverdue?'overdue':'pending';
+  const txt=locked?'⏳ Сначала выдайте':sameDayIssued?'✓ Выдан · ↩ возврат сегодня':eff==='done'&&isDoneReturn?'✓ Возвращён':eff==='done'?'✓ Выдан':eff==='return'?'🔄 К возврату':isOverdue?'🔴 Просрочен':'⏳ Ожидает';
+  const opacity=locked?'opacity:0.45;':'';
+  const workerHint = sameDayIssued
+    ? (o.issuedBy ? `<span class="oc-worker">👤 ${o.issuedBy}</span>` : '')
+    : eff==='done' && isDoneReturn && o.returnedBy
+      ? `<span class="oc-worker">👤 ${o.returnedBy}</span>`
+    : eff==='done' && o.issuedBy
+      ? `<span class="oc-worker">👤 ${o.issuedBy}</span>`
+    : '';
+  const commentHtml=_commentMap[o.id]?`<div style="font-size:10px;color:var(--muted);margin-top:3px;font-style:italic">💬 ${esc(_commentMap[o.id])}</div>`:'';
+  return`<div class="order-card ${cls}" style="${opacity}">
+    <div class="oc-top"><span class="oc-id">${esc(o.id)}</span><span class="oc-status ${cls}">${txt}</span></div>
+    <div class="oc-client">${esc(o.client||'—')}</div>
+    <div class="oc-meta"><span>📅 возврат ${o.returnDate||'—'}</span><span>${o.delivery?.includes('Наш')?'🚛':'🚶'} ${o.delivery||'—'}</span>${workerHint}</div>
+    ${commentHtml}
+  </div>`;
+}
+
+function otherVisitCard(v){
+  const isReturn = ['return','dropoff','both'].includes(v.operation);
+  const cls = isReturn ? 'returned' : 'issued';
+  const txt = isReturn ? '✓ Возвращён' : '✓ Выдан';
+  const deliveryMap = {client:'🚶 Самовывоз', yandex:'🚕 Курьер Яндекс', our:'🚛 Наша доставка'};
+  const delivery = deliveryMap[v.visitor] || v.visitor || '—';
+  const commentHtml = v.comment ? `<div style="font-size:10px;color:var(--muted);margin-top:3px;font-style:italic">💬 ${v.comment}</div>` : '';
+  return`<div class="order-card ${cls}">
+    <div class="oc-top"><span class="oc-id" style="color:var(--yandex)">⚠️ нет в списке</span><span class="oc-status ${cls}">${txt}</span></div>
+    <div class="oc-client">— · ${v.time||'—'}</div>
+    <div class="oc-meta"><span>${delivery}</span><span class="oc-worker">👤 ${worker||'—'}</span></div>
+    ${commentHtml}
+  </div>`;
+}
+
+// ── MODAL ──
+function openModal(){
+  if(!worker){ showToast('Сначала начните смену'); return; }
+  const c=visits.filter(v=>v.visitor==='client').length, y=visits.filter(v=>v.visitor==='yandex').length, o=visits.filter(v=>v.visitor==='our').length;
+  const allOrds=visits.flatMap(v=>(v.orders||[]).filter(ord=>ord.id&&ord.id!=='__other__'));
+  const times=visits.map(v=>v.time).sort();
+  const shiftStartMsk = shiftStart ? toMskTime(shiftStart) : '—';
+  const shiftNight = shiftStart ? isNightAt(shiftStart) : isNight();
+  document.getElementById('modalRows').innerHTML=`
+    <div class="mrow"><span>Кладовщик</span><b>${worker}</b></div>
+    <div class="mrow"><span>Смена</span><b>${shiftNight?'Ночная':'Дневная'}</b></div>
+    <div class="mrow"><span>Время с – по</span><b>${shiftStartMsk} – ${nowTime()} МСК</b></div>
+    <div class="mrow"><span>Визитов</span><b>${visits.length}</b></div>
+    <div class="mrow"><span>Заказов обработано</span><b>${allOrds.length}</b></div>
+    <div class="mrow"><span>Клиент / Яндекс / Наш</span><b>${c} / ${y} / ${o}</b></div>`;
+  document.getElementById('ovl').classList.add('show');
+}
+function closeModal(e){ if(!e||e.target===document.getElementById('ovl')) document.getElementById('ovl').classList.remove('show'); }
+
+// ── SUBMIT ──
+async function confirmSubmit(){
+  document.getElementById('ovl').classList.remove('show');
+  stopAutosave();
+  stopOrdersRefresh();
+  const n2=mskNow(); const mskDateClose=pad(n2.getUTCDate())+'.'+pad(n2.getUTCMonth()+1)+'.'+n2.getUTCFullYear();
+  const payload={
+    action:'closeShift',
+    shiftDate:mskDateClose,
+    shiftStart:shiftStart?shiftStart.toISOString():new Date().toISOString(),
+    shiftEnd:new Date().toISOString(),
+    worker, isNight:(shiftStart?isNightAt(shiftStart):isNight())?'Ночь':'День',
+    totalEntries:visits.length, isDraft:false,
+    entries:visits.map(v=>({
+      visitor:v.visitor, operation:v.operation,
+      orders:v.orders||[], orderId:v.orderId||'', orderClient:v.orderClient||'',
+      orderReturnDate:v.orderReturnDate||'', orderDelivery:v.orderDelivery||'',
+      comment:v.comment||'', date:v.date||'', time:v.time, timeAuto:v.timeAuto,
+      timestamp:v.ts, night:v.night?'Ночь':'День'
+    }))
+  };
+  const s=JSON.parse(localStorage.getItem('wh_shifts')||'[]'); s.push(payload);
+  if(s.length>20) s.splice(0, s.length-20); // не даём localStorage расти бесконечно
+  localStorage.setItem('wh_shifts',JSON.stringify(s));
+  localStorage.removeItem(draftKey());
+  if(!SCRIPT_URL.includes('YOUR_')){
+    try{await WHApi.closeShift(payload)}catch(e){console.error('closeShift failed',e)}
+  }
+  showSuccess(payload);
+}
+
+function showSuccess(p){
+  const c=p.entries.filter(e=>e.visitor==='client').length, y=p.entries.filter(e=>e.visitor==='yandex').length, o=p.entries.filter(e=>e.visitor==='our').length;
+  const allOrds=p.entries.flatMap(e=>(e.orders||[]).filter(ord=>ord.id&&ord.id!=='__other__'));
+  const tStart = p.shiftStart ? toMskTime(new Date(p.shiftStart)) : '—';
+  const tEnd   = p.shiftEnd   ? toMskTime(new Date(p.shiftEnd))   : '—';
+  const hrs = calcShiftHours(p.shiftStart, p.shiftEnd);
+  let hoursLine = `${hrs.total}ч`;
+  if(hrs.night>0 && hrs.day>0) hoursLine += ` (☀️ ${hrs.day}ч дневных · 🌙 ${hrs.night}ч ночных)`;
+  else if(hrs.night>0) hoursLine += ' 🌙 ночная';
+  else if(hrs.day>0)   hoursLine += ' ☀️ дневная';
+  document.getElementById('sucSub').textContent=`${p.worker} · ${p.shiftDate}`;
+  document.getElementById('sucSum').innerHTML=`
+    <div class="sr"><span class="sr-l">Кладовщик</span><span class="sr-v">${p.worker}</span></div>
+    <div class="sr"><span class="sr-l">Смена с – по (МСК)</span><span class="sr-v">${tStart} – ${tEnd}</span></div>
+    <div class="sr"><span class="sr-l">Длительность</span><span class="sr-v">${hoursLine}</span></div>
+    <div class="sr"><span class="sr-l">Визитов</span><span class="sr-v">${p.totalEntries}</span></div>
+    <div class="sr"><span class="sr-l">Заказов обработано</span><span class="sr-v">${allOrds.length}</span></div>
+    <div class="sr"><span class="sr-l">Клиент / Яндекс / Наш</span><span class="sr-v">${c} / ${y} / ${o}</span></div>`;
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.getElementById('s-success').classList.add('active');
+  window.scrollTo(0,0);
+}
+
+function resetAll(){
+  visits=[]; visitor=null; operation=null; shiftStart=null; pendingOrders=[]; hasOther=false;
+  exitViewOnly();
+  stopAutosave(); stopOrdersRefresh();
+  const vb=document.getElementById('visitsBadge'); if(vb) vb.style.display='none';
+  renderTable(); updateOrdersBar();
+  if(personalWorkerUrl){
+    // Личная ссылка — возвращаем на welcome-экран этого кладовщика
+    worker = personalWorkerUrl;
+    const found = workers.find(w=>w.name===personalWorkerUrl);
+    if(found){ showWelcomeScreen(found); return; }
+  }
+  // Общая ссылка — режим просмотра
+  worker = null;
+  loadData().then(()=>{ populateOrders(); updateOrdersBar(); renderOrderCards(); });
+  enterViewOnly();
+}
+
+function showScreen(id){ document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active')); document.getElementById('s-success').classList.remove('active'); document.getElementById(id).classList.add('active'); window.scrollTo(0,0); }
+function goBack(){
+  if(visits.length>0&&!confirm('Выйти из смены? Смена сохранена как черновик.')) return;
+  stopAutosave();
+  if(personalWorkerUrl){
+    worker = personalWorkerUrl;
+    const found = workers.find(w=>w.name===personalWorkerUrl);
+    if(found){ showWelcomeScreen(found); return; }
+  }
+  worker=null; enterViewOnly();
+}
+function pl(n,one,few,many){ if(n%10===1&&n%100!==11)return one; if([2,3,4].includes(n%10)&&![12,13,14].includes(n%100))return few; return many; }
+
+init();
+</script>
+</body>
+</html>

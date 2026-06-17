@@ -35,7 +35,7 @@ create table if not exists workers (
 -- ── СМЕНЫ ──────────────────────────────────────────────────────
 create table if not exists shifts (
   id         uuid primary key default gen_random_uuid(),
-  worker     text references workers(name),
+  worker     text,                            -- имя кладовщика (просто текст, без FK — история может содержать уволенных)
   shift_date date,
   start_at   timestamptz,
   end_at     timestamptz,
@@ -80,7 +80,7 @@ create index if not exists visit_orders_order_idx on visit_orders (order_no);
 
 -- ── ЧЕРНОВИКИ НЕЗАКРЫТЫХ СМЕН ──────────────────────────────────
 create table if not exists drafts (
-  worker   text primary key references workers(name),
+  worker   text primary key,
   data     jsonb,
   saved_at timestamptz default now()
 );
