@@ -1054,8 +1054,12 @@ function renderWorkers(){
     w.visits++;
     const ords=v.ordersArr.filter(o=>o.id&&o.id!=='__other__');
     w.orders+=ords.length;
-    if(['issue','pickup','both'].includes(v.operation)) w.issued+=ords.length;
-    if(['return','dropoff','both'].includes(v.operation)) w.returned+=ords.length;
+    if(v.operation==='both'){
+      ords.forEach(o=>{ if(['issue','pickup'].includes(o.type))  w.issued++; else if(['return','dropoff'].includes(o.type)) w.returned++; else w.issued++; });
+    } else {
+      if(['issue','pickup'].includes(v.operation)) w.issued+=ords.length;
+      if(['return','dropoff'].includes(v.operation)) w.returned+=ords.length;
+    }
     if(!v.isNight)w.day++; else w.night++;
   });
 

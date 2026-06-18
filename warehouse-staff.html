@@ -1155,8 +1155,15 @@ function getSessionStatuses(){
   visits.forEach(v=>{
     (v.orders||[]).forEach(o=>{
       if(!o.id||o.id==='__other__') return;
-      if(['issue','pickup','both'].includes(v.operation))   { issuedIds.add(o.id);   issuedBy[o.id]   = worker; }
-      if(['return','dropoff','both'].includes(v.operation)) { returnedIds.add(o.id); returnedBy[o.id] = worker; }
+      if(v.operation==='both'){
+        // Смешанный визит: используем тип конкретного заказа
+        const oType = o.type || 'issue';
+        if(['issue','pickup'].includes(oType))  { issuedIds.add(o.id);   issuedBy[o.id]   = worker; }
+        if(['return','dropoff'].includes(oType)){ returnedIds.add(o.id); returnedBy[o.id] = worker; }
+      } else {
+        if(['issue','pickup','both'].includes(v.operation))   { issuedIds.add(o.id);   issuedBy[o.id]   = worker; }
+        if(['return','dropoff','both'].includes(v.operation)) { returnedIds.add(o.id); returnedBy[o.id] = worker; }
+      }
     });
   });
   return {issuedIds, returnedIds, issuedBy, returnedBy};
@@ -1288,7 +1295,8 @@ function getEffectiveOperation(){
 
   if (issueCount > 0 && returnCount === 0) return 'issue';
   if (returnCount > 0 && issueCount === 0) return 'return';
-  return 'issue'; // mixed — редкий случай, берём первую операцию
+  if (issueCount > 0 && returnCount > 0) return 'both'; // курьер: одни выдаём, другие забираем
+  return operation || null;
 }
 
 function checkReady(){
@@ -1321,7 +1329,7 @@ function addVisit(){
   const visit={
     n:visits.length+1,
     visitor, operation:op,
-    orders:pendingOrders.map(o=>({id:o.id,client:o.client||'',returnDate:o.returnDate||'',delivery:o.delivery||''})),
+    orders:pendingOrders.map(o=>({id:o.id,client:o.client||'',returnDate:o.returnDate||'',delivery:o.delivery||'',type:o.type||null})),
     // legacy compat
     orderId:pendingOrders[0]?.id||null,
     orderClient:pendingOrders[0]?.client||null,
