@@ -726,11 +726,12 @@ function renderOrders(){
   const rowOf = (o, typeLabel, forceOverdue) => {
     const s = statusOf(o);
     const done = s==='issued'||s==='returned';
+    const isOv = forceOverdue || o.overdue;
     const dateRange = [o.issueDate,o.returnDate].filter(Boolean).join(' → ');
     const delivBadge = o.delivery?.includes('Наш')
       ? `<span class="badge delivery">🚛 Наша</span>`
       : `<span class="badge self">🚶 Самовывоз</span>`;
-    const statusBadge = forceOverdue || o.overdue
+    const statusBadge = isOv
       ? `<span class="badge" style="background:rgba(231,76,60,.15);color:#c0392b">🔴 Просрочен</span>`
       : s==='issued'
       ? `<span class="badge issued">✓ Выдан</span>`
@@ -741,11 +742,18 @@ function renderOrders(){
       : `<span class="badge" style="background:rgba(61,155,233,.15);color:#1a6fa0">🔄 Ожидает</span>`;
     const timeInfo = o.issueTime||o.returnTime ? `<br><span style="font-size:10px;color:var(--muted)">${o.issueTime||o.returnTime}</span>` : '';
     const commentHtml = commentMap[o.id] ? `<br><span style="font-size:10px;color:var(--muted);font-style:italic">💬 ${commentMap[o.id]}</span>` : '';
+    let overdueHint = '';
+    if(isOv && o.returnDate){
+      const rp = o.returnDate.split('.');
+      const retDate = rp.length===3 ? new Date(`${rp[2]}-${rp[1]}-${rp[0]}`) : null;
+      const days = retDate ? Math.floor((Date.now()-retDate)/86400000) : 0;
+      overdueHint = `<br><span style="font-size:10px;color:#c0392b">📅 возврат ${o.returnDate}${days>0?` · просрочен ${days} дн.`:''}</span>`;
+    }
     const delBtn = `<button class="del-order-btn" onclick="deleteOrderUI('${o.id.replace(/'/g,"\\'")}','${(o.client||'').replace(/'/g,"\\'")}')">🗑</button>`;
-    return {done, html:`<tr>
+    return {done, html:`<tr${isOv?' style="background:rgba(231,76,60,.03)"':''}>
       <td>${statusBadge}</td>
       <td><span class="onum">${o.id}</span></td>
-      <td><strong>${o.client||'—'}</strong>${o.company?`<br><span style="font-size:10px;color:var(--muted)">${o.company}</span>`:''}${commentHtml}</td>
+      <td><strong>${o.client||'—'}</strong>${o.company?`<br><span style="font-size:10px;color:var(--muted)">${o.company}</span>`:''}${commentHtml}${overdueHint}</td>
       <td style="font-family:'JetBrains Mono',monospace;font-size:11px">${dateRange}${timeInfo}</td>
       <td>${delivBadge}</td>
       <td>${o.worker?`<span style="font-size:11px;font-weight:600;color:var(--mid)">${o.worker}</span>`:'—'}</td>
@@ -758,7 +766,17 @@ function renderOrders(){
     const rows = orders.map(o=>rowOf(o,typeLabel,forceOverdue));
     const pending = rows.filter(r=>!r.done);
     const done    = rows.filter(r=>r.done);
-    let html = `<div class="orders-section-lbl">${title} (${orders.length})</div>
+    const collapseId = forceOverdue ? 'ov-section-body' : '';
+    const isOvSection = !!forceOverdue;
+    const hdrStyle = isOvSection
+      ? 'cursor:pointer;user-select:none;color:#c0392b;display:flex;align-items:center;justify-content:space-between'
+      : '';
+    const collapseAttr = isOvSection
+      ? ` onclick="this.querySelector('.ov-arrow').textContent=this.nextElementSibling.style.display==='none'?'▼':'▲';this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'':'none'"`
+      : '';
+    const arrow = isOvSection ? `<span class="ov-arrow" style="font-size:11px;color:#c0392b">▼</span>` : '';
+    let html = `<div class="orders-section-lbl" style="${hdrStyle}"${collapseAttr}><span>${title} (${orders.length})</span>${arrow}</div>
+    <div${isOvSection?' id="'+collapseId+'"':''}>
     <table class="dt"><thead><tr>
       <th>Статус</th><th>Заказ</th><th>Клиент</th><th>Даты аренды</th><th>Доставка</th><th>Работник</th><th></th>
     </tr></thead><tbody>`;
@@ -767,7 +785,7 @@ function renderOrders(){
       html+=`<tr class="tg-hdr"><td colspan="6">✓ Выдано / Возвращено (${done.length})</td></tr>`;
       done.forEach(r=>html+=r.html);
     }
-    html+='</tbody></table>';
+    html+='</tbody></table></div>';
     return html;
   };
 
