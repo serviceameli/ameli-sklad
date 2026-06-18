@@ -290,6 +290,16 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
 .date-compact-lbl{font-size:11px;color:var(--muted);font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:4px;padding:3px 0;user-select:none}
 .date-compact-lbl:hover{color:var(--black)}
 .date-compact-picker{margin-top:5px}
+/* ── CONFIRM DIALOG ── */
+#stConfirmOvl{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1500;align-items:center;justify-content:center;padding:16px}
+#stConfirmOvl.open{display:flex}
+#stConfirmBox{background:var(--card);border-radius:18px;padding:22px 20px 18px;width:100%;max-width:340px}
+#stConfirmTitle{font-size:16px;font-weight:700;color:var(--black);margin-bottom:8px}
+#stConfirmBody{font-size:13px;color:var(--mid);line-height:1.5;margin-bottom:16px;white-space:pre-line}
+#stConfirmActs{display:flex;gap:9px}
+#stConfirmActs button{flex:1;padding:11px;border-radius:12px;font-family:'Montserrat',sans-serif;font-size:13px;font-weight:700;border:none;cursor:pointer}
+#stConfirmOk{background:var(--black);color:#fff}
+#stConfirmCancel{background:var(--bg);color:var(--mid)}
 /* ── MODAL ── */
 .ovl{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:800;align-items:flex-end;padding:0}
 .ovl.show{display:flex}
@@ -1562,7 +1572,7 @@ function renderTable(){
   if(vb){ vb.textContent=visits.length; vb.style.display=visits.length?'inline-block':'none'; }
 }
 
-function delVisit(i){
+async function delVisit(i){
   const visit = visits[i];
   if(!visit) return;
 
@@ -1576,8 +1586,8 @@ function delVisit(i){
     lines.push(`Заказ${realOrders.length>1?'ы':''} ${realOrders.map(o=>o.id).join(', ')} вернётся на ${action}.`);
   }
   if(hasOtherFlag) lines.push('Заказ не из списка будет удалён.');
-  const msg = `Удалить визит?\n${lines.join('\n')}`;
-  if(!confirm(msg)) return;
+  const ok = await stConfirm('Удалить визит?', lines.join('\n'), 'Удалить');
+  if(!ok) return;
 
   // Немедленно убираем из серверных наборов и запоминаем на 90 сек —
   // чтобы refresh не вернул заказ, пока сервер не обработал deleteVisit
@@ -1839,8 +1849,11 @@ function resetAll(){
 }
 
 function showScreen(id){ document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active')); document.getElementById('s-success').classList.remove('active'); document.getElementById(id).classList.add('active'); window.scrollTo(0,0); }
-function goBack(){
-  if(visits.length>0&&!confirm('Выйти из смены? Смена сохранена как черновик.')) return;
+async function goBack(){
+  if(visits.length>0){
+    const ok=await stConfirm('Выйти из смены?','Смена сохранена как черновик.','Выйти');
+    if(!ok) return;
+  }
   stopAutosave();
   if(personalWorkerUrl){
     worker = personalWorkerUrl;
@@ -1852,6 +1865,28 @@ function goBack(){
 function pl(n,one,few,many){ if(n%10===1&&n%100!==11)return one; if([2,3,4].includes(n%10)&&![12,13,14].includes(n%100))return few; return many; }
 
 init();
+</script>
+<div id="stConfirmOvl">
+  <div id="stConfirmBox">
+    <div id="stConfirmTitle"></div>
+    <div id="stConfirmBody"></div>
+    <div id="stConfirmActs">
+      <button id="stConfirmCancel" onclick="stConfirmResolve(false)">Отмена</button>
+      <button id="stConfirmOk" onclick="stConfirmResolve(true)">Удалить</button>
+    </div>
+  </div>
+</div>
+<script>
+let stConfirmResolve=()=>{};
+function stConfirm(title,body,okLabel){
+  return new Promise(res=>{
+    document.getElementById('stConfirmTitle').textContent=title;
+    document.getElementById('stConfirmBody').textContent=body;
+    document.getElementById('stConfirmOk').textContent=okLabel||'OK';
+    document.getElementById('stConfirmOvl').classList.add('open');
+    stConfirmResolve=function(v){ document.getElementById('stConfirmOvl').classList.remove('open'); res(v); };
+  });
+}
 </script>
 </body>
 </html>
