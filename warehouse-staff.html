@@ -67,18 +67,6 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
 .wlc-btn-desc{font-size:11px;font-weight:500;opacity:.65}
 
 /* ── PIN SCREEN ── */
-.pin-wrap{padding:32px 20px;text-align:center}
-.pin-name{font-size:22px;font-weight:700;color:var(--black);margin-bottom:4px}
-.pin-sub{font-size:13px;color:var(--muted);margin-bottom:28px}
-.pin-dots{display:flex;justify-content:center;gap:12px;margin-bottom:24px}
-.pin-dot{width:16px;height:16px;border-radius:50%;background:var(--rule);transition:background .15s}
-.pin-dot.filled{background:var(--black)}
-.pin-pad{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:240px;margin:0 auto}
-.pin-key{background:var(--card);border:2px solid var(--rule);border-radius:14px;padding:16px;font-size:20px;font-weight:700;cursor:pointer;font-family:'Montserrat',sans-serif;transition:all .12s}
-.pin-key:active{transform:scale(.93);background:var(--bg)}
-.pin-key.del{font-size:15px;color:var(--muted)}
-.pin-error{color:#E74C3C;font-size:13px;font-weight:600;margin-top:14px;min-height:20px}
-.pin-change{font-size:12px;color:var(--muted);text-decoration:underline;cursor:pointer;margin-top:16px;display:inline-block}
 
 /* ── WORKER SELECT ── */
 .ws{padding:18px 15px}
@@ -429,36 +417,6 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
         </span>
       </button>
     </div>
-  </div>
-</div>
-
-<!-- ═══ PIN ═══ -->
-<div class="screen" id="s-pin">
-  <div class="pin-wrap">
-    <div class="pin-name" id="pinWorkerName">—</div>
-    <div class="pin-sub">Введите PIN-код</div>
-    <div class="pin-dots">
-      <div class="pin-dot" id="pd0"></div>
-      <div class="pin-dot" id="pd1"></div>
-      <div class="pin-dot" id="pd2"></div>
-      <div class="pin-dot" id="pd3"></div>
-    </div>
-    <div class="pin-pad">
-      <button class="pin-key" onclick="pinKey('1')">1</button>
-      <button class="pin-key" onclick="pinKey('2')">2</button>
-      <button class="pin-key" onclick="pinKey('3')">3</button>
-      <button class="pin-key" onclick="pinKey('4')">4</button>
-      <button class="pin-key" onclick="pinKey('5')">5</button>
-      <button class="pin-key" onclick="pinKey('6')">6</button>
-      <button class="pin-key" onclick="pinKey('7')">7</button>
-      <button class="pin-key" onclick="pinKey('8')">8</button>
-      <button class="pin-key" onclick="pinKey('9')">9</button>
-      <button class="pin-key" style="visibility:hidden"></button>
-      <button class="pin-key" onclick="pinKey('0')">0</button>
-      <button class="pin-key del" onclick="pinDel()">⌫</button>
-    </div>
-    <div class="pin-error" id="pinError"></div>
-    <span class="pin-change" onclick="pinChangeWorker()">← Сменить кладовщика</span>
   </div>
 </div>
 
@@ -863,17 +821,6 @@ async function loadData(workerParam){
   }
 }
 
-function demoOrders(){
-  const d=p=>{const dt=new Date();dt.setDate(dt.getDate()+p);return dt.toLocaleDateString('ru',{day:'numeric',month:'short'})};
-  return[
-    {id:'A-4521',client:'Иванова Мария',returnDate:d(3),delivery:'Наша доставка',status:'pending',type:'issue'},
-    {id:'A-4522',client:'Петров Александр',returnDate:d(0),delivery:'Самовывоз',status:'pending',type:'return'},
-    {id:'A-4523',client:'Сидорова Анна',returnDate:d(5),delivery:'Наша доставка',status:'pending',type:'issue'},
-    {id:'B-1034',client:'Козлов Дмитрий',returnDate:d(0),delivery:'Самовывоз',status:'pending',type:'return'},
-    {id:'B-1035',client:'Новикова Елена',returnDate:d(7),delivery:'Самовывоз',status:'pending',type:'issue'},
-  ];
-}
-
 // ── DRAFT ──
 function saveDraft(){
   if(!worker) return;
@@ -916,57 +863,6 @@ function restoreShift(){
   startAutosave();
 }
 function discardDraft(){ localStorage.removeItem(draftKey()); document.getElementById('restoreBanner').classList.remove('show'); }
-
-// ── PIN ──
-let pinBuffer='', pinWorkerObj=null;
-
-function showPinScreen(workerObj){
-  pinWorkerObj=workerObj;
-  pinBuffer='';
-  document.getElementById('pinWorkerName').textContent=workerObj.name;
-  document.getElementById('pinError').textContent='';
-  updatePinDots();
-  showScreen('s-pin');
-}
-
-function pinKey(digit){
-  if(pinBuffer.length>=4) return;
-  pinBuffer+=digit;
-  updatePinDots();
-  if(pinBuffer.length===4) setTimeout(checkPin,120);
-}
-
-function pinDel(){
-  pinBuffer=pinBuffer.slice(0,-1);
-  updatePinDots();
-  document.getElementById('pinError').textContent='';
-}
-
-function updatePinDots(){
-  for(let i=0;i<4;i++){
-    document.getElementById('pd'+i).classList.toggle('filled',i<pinBuffer.length);
-  }
-}
-
-function checkPin(){
-  const correctPin = pinWorkerObj?.pin || '';
-  if(pinBuffer===correctPin){
-    localStorage.setItem(authKey(pinWorkerObj.name),'1');
-    worker=pinWorkerObj.name;
-    afterAuth();
-  } else {
-    pinBuffer='';
-    updatePinDots();
-    document.getElementById('pinError').textContent='Неверный PIN, попробуйте ещё раз';
-  }
-}
-
-function pinChangeWorker(){
-  worker=null; pinWorkerObj=null; pinBuffer='';
-  // Убираем URL-параметр чтобы вернуться к выбору
-  history.replaceState(null,'',location.pathname);
-  showScreen('s-worker');
-}
 
 // ── RESTORE DIRECT (без баннера, для персональной ссылки) ──
 function restoreShiftDirect(draft){
