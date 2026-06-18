@@ -620,7 +620,8 @@ async function init(){
 
   // Один запрос к серверу — с именем кладовщика если есть (чтобы получить его черновик)
   const serverDraft = await loadData(urlWorker || null);
-  renderWorkers(); populateOrders();
+  try{ renderWorkers(); }catch(e){ console.error('renderWorkers',e); }
+  try{ populateOrders(); }catch(e){ console.error('populateOrders',e); }
   document.getElementById('loadingScr').style.display='none';
 
   if(urlWorker){
@@ -806,7 +807,8 @@ function showToast(msg, color){
 // ── LOAD ──
 async function loadData(workerParam){
   try{
-    const j=await WHApi.getData(workerParam);
+    const timeout = new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),12000));
+    const j=await Promise.race([WHApi.getData(workerParam), timeout]);
     workers=j.workers||[]; orders=j.orders||[];
     serverIssuedToday   = new Set(j.processedOrders?.issued   || []);
     serverReturnedToday = new Set(j.processedOrders?.returned || []);
@@ -815,8 +817,7 @@ async function loadData(workerParam){
     serverOtherVisits = j.processedOrders?.otherVisits || [];
     return j.draft || null; // черновик этого кладовщика с сервера
   }catch(e){
-    workers=[]; // имена берутся только из Google Sheets
-    orders=[];
+    workers=[]; orders=[];
     return null;
   }
 }
