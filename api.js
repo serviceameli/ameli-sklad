@@ -136,7 +136,7 @@
     const today = mskToday();
 
     const [wk, ord, st, dr] = await Promise.all([
-      sb.from('workers').select('name,pin').eq('active', true),
+      sb.from('workers').select('name').eq('active', true),
       sb.from('orders').select('*'),
       sb.from('order_status').select('*'),
       worker

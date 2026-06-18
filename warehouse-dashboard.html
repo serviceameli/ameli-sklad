@@ -749,7 +749,7 @@ function renderOrders(){
       const days = retDate ? Math.floor((Date.now()-retDate)/86400000) : 0;
       overdueHint = `<br><span style="font-size:10px;color:#c0392b">📅 возврат ${o.returnDate}${days>0?` · просрочен ${days} дн.`:''}</span>`;
     }
-    const delBtn = `<button class="del-order-btn" onclick="deleteOrderUI('${o.id.replace(/'/g,"\\'")}','${(o.client||'').replace(/'/g,"\\'")}')">🗑</button>`;
+    const delBtn = `<button class="del-order-btn" onclick="deleteOrderUI(${jsq(o.id)},${jsq(o.client||'')})">🗑</button>`;
     return {done, html:`<tr${isOv?' style="background:rgba(231,76,60,.03)"':''}>
       <td>${statusBadge}</td>
       <td><span class="onum">${o.id}</span></td>
@@ -1445,7 +1445,7 @@ function renderLinkTab(){
           </div>
           <button class="link-btn" onclick="openLinkModal(${i})">Связать →</button>
         </div>
-        ${v.comment?`<div class="visit-card-comment">💬 ${v.comment}</div>`:''}
+        ${v.comment?`<div class="visit-card-comment">💬 ${esc(v.comment)}</div>`:''}
         ${v.orders.length?`<div style="margin-top:6px;font-size:11px;color:var(--muted)">Уже привязаны: ${v.orders.map(o=>o.id).join(', ')}</div>`:''}
       </div>`;
     });
@@ -1623,7 +1623,7 @@ async function deleteOrderUI(orderId, client) {
 
   const ok = await showConfirm(
     'Удалить заказ?',
-    `Заказ <strong>${orderId}</strong>${client ? ' · ' + client : ''} будет удалён из базы.${statusNote}`,
+    `Заказ <strong>${esc(orderId)}</strong>${client ? ' · ' + esc(client) : ''} будет удалён из базы.${statusNote}`,
     'Удалить'
   );
   if (!ok) return;
