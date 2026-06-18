@@ -366,8 +366,16 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
 
 <!-- LOADING -->
 <div id="loadingScr" style="padding:60px 18px;text-align:center">
-  <div style="width:32px;height:32px;border:3px solid #e8e8e4;border-top-color:#F5C518;border-radius:50%;animation:spin .7s linear infinite;margin:0 auto 13px"></div>
-  <div style="font-size:13px;font-weight:600;color:#888">Загрузка заказов...</div>
+  <div id="loadingSpinner">
+    <div style="width:32px;height:32px;border:3px solid #e8e8e4;border-top-color:#F5C518;border-radius:50%;animation:spin .7s linear infinite;margin:0 auto 13px"></div>
+    <div style="font-size:13px;font-weight:600;color:#888">Загрузка заказов...</div>
+  </div>
+  <div id="loadingError" style="display:none">
+    <div style="font-size:32px;margin-bottom:12px">📡</div>
+    <div style="font-size:14px;font-weight:700;color:#2D2D2D;margin-bottom:6px">Нет соединения</div>
+    <div style="font-size:12px;color:#888;margin-bottom:24px">Не удалось загрузить данные.<br>Проверь интернет и попробуй снова.</div>
+    <button onclick="retryInit()" style="background:#1A1A1A;color:#fff;border:none;border-radius:13px;padding:14px 28px;font-family:'Montserrat',sans-serif;font-size:14px;font-weight:700;cursor:pointer">↺ Повторить</button>
+  </div>
 </div>
 
 <!-- ═══ WELCOME (персональная ссылка) ═══ -->
@@ -620,6 +628,14 @@ async function init(){
 
   // Один запрос к серверу — с именем кладовщика если есть (чтобы получить его черновик)
   const serverDraft = await loadData(urlWorker || null);
+
+  // Если данные не загрузились — показываем экран ошибки с кнопкой «Повторить»
+  if(!workers.length && !orders.length){
+    document.getElementById('loadingSpinner').style.display='none';
+    document.getElementById('loadingError').style.display='block';
+    return;
+  }
+
   try{ renderWorkers(); }catch(e){ console.error('renderWorkers',e); }
   try{ populateOrders(); }catch(e){ console.error('populateOrders',e); }
   document.getElementById('loadingScr').style.display='none';
@@ -1769,6 +1785,11 @@ async function goBack(){
 }
 function pl(n,one,few,many){ if(n%10===1&&n%100!==11)return one; if([2,3,4].includes(n%10)&&![12,13,14].includes(n%100))return few; return many; }
 
+function retryInit(){
+  document.getElementById('loadingError').style.display='none';
+  document.getElementById('loadingSpinner').style.display='block';
+  init();
+}
 init();
 </script>
 <div id="stConfirmOvl">
