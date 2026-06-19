@@ -648,17 +648,17 @@ async function init(){
       'WHApi: ' + typeof window.WHApi,
       'UA: ' + navigator.userAgent.slice(0,80)
     ];
-    // Быстрый fetch-тест в обход supabase-js
+    // fetch-тест БЕЗ кастомных заголовков (apikey в URL — должен работать без preflight)
     try{
       const t0=Date.now();
       const r=await Promise.race([
-        fetch('https://xkqaipggklmgussjphkp.supabase.co/rest/v1/workers?select=name&active=eq.true',
-          {headers:{apikey:'sb_publishable_h7zhxKris7gY8i-dxOvx4w__cxxPIRX'}}),
-        new Promise((_,rej)=>setTimeout(()=>rej(new Error('fetch timeout 8s')),8000))
+        fetch('https://xkqaipggklmgussjphkp.supabase.co/rest/v1/workers?select=name&active=eq.true&apikey=sb_publishable_h7zhxKris7gY8i-dxOvx4w__cxxPIRX',
+          {credentials:'omit'}),
+        new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout 8s')),8000))
       ]);
-      diagLines.push('fetch test: ' + r.status + ' за ' + (Date.now()-t0) + 'мс');
+      diagLines.push('fetch(no-hdr): ' + r.status + ' за ' + (Date.now()-t0) + 'мс');
     }catch(fe){
-      diagLines.push('fetch test: ' + fe);
+      diagLines.push('fetch(no-hdr): ' + fe);
     }
     errEl.innerHTML = diagLines.map(l=>`<div>${l}</div>`).join('');
     errEl.style.display='block';
