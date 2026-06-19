@@ -142,11 +142,11 @@
     var today = mskToday();
     var sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
     return Promise.all([
-      sfetch('visits', 'select=*&is_other=eq.true&visit_date=gte.' + sevenDaysAgo),
-      sfetch('visit_orders', 'select=*'),
-      sfetch('shifts', 'select=*'),
-      sfetch('orders', 'select=*'),
-      sfetch('order_status', 'select=*')
+      sfetch('visits', 'select=*&is_other=eq.true&visit_date=gte.' + sevenDaysAgo + '&limit=10000'),
+      sfetch('visit_orders', 'select=*&limit=10000'),
+      sfetch('shifts', 'select=*&limit=10000'),
+      sfetch('orders', 'select=*&limit=10000'),
+      sfetch('order_status', 'select=*&limit=10000')
     ]).then(function(res) {
       var visits = res[0], vorders = res[1], shifts = res[2], orders = res[3], statuses = res[4];
       var shiftById = {}, voByVisit = {};
@@ -229,9 +229,9 @@
   function getWorkerHistory(workerName) {
     var wEnc = encodeURIComponent(workerName);
     return Promise.all([
-      sfetch('shifts', 'select=*&worker=eq.' + wEnc + '&order=start_at.desc'),
-      sfetch('visits', 'select=*&worker=eq.' + wEnc),
-      sfetch('visit_orders', 'select=*')
+      sfetch('shifts', 'select=*&worker=eq.' + wEnc + '&order=start_at.desc&limit=10000'),
+      sfetch('visits', 'select=*&worker=eq.' + wEnc + '&limit=10000'),
+      sfetch('visit_orders', 'select=*&limit=10000')
     ]).then(function(res) {
       var shifts = res[0], visits = res[1], vorders = res[2];
       var voByVisit = {}, visByShift = {};
