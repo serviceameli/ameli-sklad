@@ -5,11 +5,31 @@
 //  Требует: supabase-js (CDN) + config.js (SUPABASE_URL, SUPABASE_KEY).
 // ═══════════════════════════════════════════════════════════════
 (function (global) {
+  // Кастомный fetch: перекладывает apikey/Authorization из заголовков в URL-параметр
+  // для GET-запросов — это делает их «простыми» (no CORS preflight).
+  // Для POST/PATCH/DELETE оставляет заголовки как есть.
+  function noPrefetchFetch(url, options) {
+    const method = (options && options.method || 'GET').toUpperCase();
+    if (method === 'GET' || method === 'HEAD') {
+      const hdrs = (options && options.headers) || {};
+      const key = hdrs['apikey'] || hdrs['Apikey'] || SUPABASE_KEY;
+      const sep = url.includes('?') ? '&' : '?';
+      const newUrl = url + sep + 'apikey=' + encodeURIComponent(key);
+      const newHdrs = {};
+      // Оставляем только «безопасные» заголовки (не триггерят preflight)
+      if (hdrs['Accept']) newHdrs['Accept'] = hdrs['Accept'];
+      if (hdrs['accept']) newHdrs['Accept'] = hdrs['accept'];
+      return fetch(newUrl, { ...options, headers: newHdrs });
+    }
+    return fetch(url, options);
+  }
+
   let _client = null;
   function client() {
     if (!_client) _client = global.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
       auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-      realtime: { reconnectAfterMs: () => 999999999 }
+      realtime: { reconnectAfterMs: () => 999999999 },
+      global: { fetch: noPrefetchFetch }
     });
     return _client;
   }
