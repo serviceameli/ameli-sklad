@@ -114,7 +114,7 @@
     const sb = client();
     const today = mskToday();
     const [ord, st, shifts] = await Promise.all([
-      sb.from('orders').select('order_no,client,company,issue_date,issue_time,return_date,return_time,delivery_worker,site_status,deleted_at'),
+      sb.from('orders').select('order_no,client,company,issue_date,issue_time,return_date,return_time,delivery_worker,site_status'),
       sb.from('order_status').select('order_no,issued,returned,issued_by,returned_by'),
       buildShifts(sb, fromDate)
     ]);
@@ -140,7 +140,7 @@
 
     const [wk, ord, st, dr] = await Promise.all([
       sb.from('workers').select('name').eq('active', true),
-      sb.from('orders').select('order_no,client,company,issue_date,issue_time,return_date,return_time,delivery_worker,site_status,deleted_at'),
+      sb.from('orders').select('order_no,client,company,issue_date,issue_time,return_date,return_time,delivery_worker,site_status'),
       sb.from('order_status').select('order_no,issued,returned,issued_by,returned_by'),
       worker
         ? sb.from('drafts').select('data').eq('worker', worker).maybeSingle()

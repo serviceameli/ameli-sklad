@@ -72,10 +72,60 @@ function syncOrders() {
     else break;
   }
 
-  const ok = lastCode >= 200 && lastCode < 300;
-  return ok
-    ? { ok: true, synced }
-    : { ok: false, synced, code: lastCode, error: lastBody };
+  if (lastCode < 200 || lastCode >= 300) {
+    return { ok: false, synced, code: lastCode, error: lastBody };
+  }
+
+  // Мягкое удаление: заказы которых больше нет в Sheets → deleted_at = now()
+  const activeNos = rows.map(r => r.order_no);
+  _softDeleteMissing(cfg, activeNos);
+
+  return { ok: true, synced };
+}
+
+// Помечает deleted_at для заказов, которых нет в текущей выгрузке из Sheets
+function _softDeleteMissing(cfg, activeNos) {
+  // Сначала снимаем deleted_at у тех, кто вернулся (на всякий случай)
+  UrlFetchApp.fetch(cfg.url + '/rest/v1/orders?deleted_at=not.is.null', {
+    method: 'patch',
+    contentType: 'application/json',
+    headers: {
+      apikey: cfg.key,
+      Authorization: 'Bearer ' + cfg.key,
+      Prefer: 'return=minimal'
+    },
+    payload: JSON.stringify({ deleted_at: null }),
+    muteHttpExceptions: true
+  });
+
+  // Получаем все order_no из базы
+  const resp = UrlFetchApp.fetch(cfg.url + '/rest/v1/orders?select=order_no&deleted_at=is.null', {
+    headers: { apikey: cfg.key, Authorization: 'Bearer ' + cfg.key },
+    muteHttpExceptions: true
+  });
+  if (resp.getResponseCode() !== 200) return;
+  const dbNos = JSON.parse(resp.getContentText()).map(r => r.order_no);
+  const activeSet = new Set(activeNos);
+  const toDelete = dbNos.filter(n => !activeSet.has(n));
+  if (!toDelete.length) return;
+
+  // Помечаем батчами по 100 (URL-лимит)
+  const now = new Date().toISOString();
+  for (let i = 0; i < toDelete.length; i += 100) {
+    const batch = toDelete.slice(i, i + 100);
+    const inFilter = 'in.(' + batch.map(n => '"' + n.replace(/"/g,'\\"') + '"').join(',') + ')';
+    UrlFetchApp.fetch(cfg.url + '/rest/v1/orders?order_no=' + encodeURIComponent(inFilter), {
+      method: 'patch',
+      contentType: 'application/json',
+      headers: {
+        apikey: cfg.key,
+        Authorization: 'Bearer ' + cfg.key,
+        Prefer: 'return=minimal'
+      },
+      payload: JSON.stringify({ deleted_at: now }),
+      muteHttpExceptions: true
+    });
+  }
 }
 
 // ── Расписание: автосинк 1–2 раза в день ──
