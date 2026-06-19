@@ -835,16 +835,25 @@ function showToast(msg, color){
 
 // ── LOAD ──
 async function loadData(workerParam){
+  const attempt = () => {
+    const t = new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),25000));
+    return Promise.race([WHApi.getData(workerParam), t]);
+  };
   try{
-    const timeout = new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),12000));
-    const j=await Promise.race([WHApi.getData(workerParam), timeout]);
+    let j;
+    try{ j = await attempt(); }
+    catch(e1){
+      // Автоповтор один раз через 3 сек
+      await new Promise(r=>setTimeout(r,3000));
+      j = await attempt();
+    }
     workers=j.workers||[]; orders=j.orders||[];
     serverIssuedToday   = new Set(j.processedOrders?.issued   || []);
     serverReturnedToday = new Set(j.processedOrders?.returned || []);
     serverIssuedBy   = j.processedOrders?.issuedBy   || {};
     serverReturnedBy = j.processedOrders?.returnedBy || {};
     serverOtherVisits = j.processedOrders?.otherVisits || [];
-    return j.draft || null; // черновик этого кладовщика с сервера
+    return j.draft || null;
   }catch(e){
     workers=[]; orders=[];
     window._lastLoadError = e;

@@ -137,10 +137,13 @@
   async function getData(worker) {
     const sb = client();
     const today = mskToday();
+    // Берём заказы только за последние 60 дней — снижает трафик на мобиле
+    const cutoff = new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 10);
 
     const [wk, ord, st, dr] = await Promise.all([
       sb.from('workers').select('name').eq('active', true),
-      sb.from('orders').select('order_no,client,company,issue_date,issue_time,return_date,return_time,delivery_worker,site_status'),
+      sb.from('orders').select('order_no,client,company,issue_date,issue_time,return_date,return_time,delivery_worker,site_status')
+        .or(`issue_date.gte.${cutoff},return_date.gte.${cutoff}`),
       sb.from('order_status').select('order_no,issued,returned,issued_by,returned_by'),
       worker
         ? sb.from('drafts').select('data').eq('worker', worker).maybeSingle()
