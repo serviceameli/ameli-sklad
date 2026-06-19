@@ -180,13 +180,35 @@ function _getData(cfg, worker) {
   var cutoff = _dateNDaysAgo(60);
   var twoDaysAgo = _dateNDaysAgo(2);
 
-  var workers  = _sbGet(cfg, 'workers?select=name&active=eq.true');
-  var orders   = _sbGet(cfg, 'orders?select=order_no,client,company,issue_date,issue_time,return_date,return_time,delivery_worker,site_status&or=(issue_date.gte.' + cutoff + ',return_date.gte.' + cutoff + ')');
-  var statuses = _sbGet(cfg, 'order_status?select=order_no,issued,returned,issued_by,returned_by');
+  var workers   = _sbGet(cfg, 'workers?select=name&active=eq.true');
+  var orders    = _sbGet(cfg, 'orders?select=order_no,client,company,issue_date,issue_time,return_date,return_time,delivery_worker,site_status&or=(issue_date.gte.' + cutoff + ',return_date.gte.' + cutoff + ')');
+  var statuses  = _sbGet(cfg, 'order_status?select=order_no,issued,returned,issued_by,returned_by');
   var draftRows = worker ? _sbGet(cfg, 'drafts?select=data&worker=eq.' + encodeURIComponent(worker) + '&limit=1') : [];
   var otherRows = _sbGet(cfg, 'visits?select=visitor,operation,visit_time,visit_date,worker,comment&is_other=eq.true&visit_date=gte.' + twoDaysAgo);
 
+  // Резервный источник: visit_orders + visits — для визитов до внедрения order_status
+  var allVisits  = _sbGet(cfg, 'visits?select=id,operation,worker&is_other=eq.false&visit_date=gte.' + cutoff);
+  var allVorders = _sbGet(cfg, 'visit_orders?select=order_no,visit_id');
+  var visitMap   = {};
+  allVisits.forEach(function(v) { visitMap[v.id] = v; });
+
   var issuedSet = {}, returnedSet = {}, issuedBy = {}, returnedBy = {};
+  // Сначала — данные из visit_orders (исторические)
+  allVorders.forEach(function(vo) {
+    if (!vo.order_no) return;
+    var v = visitMap[vo.visit_id];
+    if (!v) return;
+    var op = v.operation || '';
+    if (op === 'issue' || op === 'both') {
+      issuedSet[vo.order_no] = true;
+      if (v.worker && !issuedBy[vo.order_no]) issuedBy[vo.order_no] = v.worker;
+    }
+    if (op === 'return' || op === 'both') {
+      returnedSet[vo.order_no] = true;
+      if (v.worker && !returnedBy[vo.order_no]) returnedBy[vo.order_no] = v.worker;
+    }
+  });
+  // Потом — order_status перезаписывает (более точные данные для новых визитов)
   statuses.forEach(function(r) {
     if (r.issued)   { issuedSet[r.order_no] = true;   if (r.issued_by)   issuedBy[r.order_no]   = r.issued_by;   }
     if (r.returned) { returnedSet[r.order_no] = true; if (r.returned_by) returnedBy[r.order_no] = r.returned_by; }
@@ -407,7 +429,23 @@ function syncOrders() {
     if (lastCode >= 200 && lastCode < 300) synced += batch.length; else break;
   }
   if (lastCode < 200 || lastCode >= 300) return { ok: false, synced: synced, code: lastCode, error: lastBody };
-  return { ok: true, synced: synced };
+
+  // Удаляем из Supabase заказы, которых больше нет в Sheets
+  var sheetsNos = {};
+  rows.forEach(function(r) { sheetsNos[r.order_no] = true; });
+  try {
+    var existing = _sbGet(cfg, 'orders?select=order_no');
+    var toDelete = existing.map(function(r) { return r.order_no; }).filter(function(no) { return !sheetsNos[no]; });
+    var deleted = 0;
+    for (var d = 0; d < toDelete.length; d += 100) {
+      var batch = toDelete.slice(d, d + 100);
+      _sbDelete(cfg, 'orders?order_no=in.(' + batch.join(',') + ')');
+      deleted += batch.length;
+    }
+    return { ok: true, synced: synced, deleted: deleted };
+  } catch(e) {
+    return { ok: true, synced: synced, deleteError: e.toString() };
+  }
 }
 
 function setupSyncTrigger() {
