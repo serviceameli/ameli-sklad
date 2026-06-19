@@ -642,10 +642,26 @@ async function init(){
     document.getElementById('loadingSpinner').style.display='none';
     document.getElementById('loadingError').style.display='block';
     const errEl = document.getElementById('loadingErrorDetail');
-    if(window._lastLoadError){
-      errEl.textContent = String(window._lastLoadError);
-      errEl.style.display='block';
+    const diagLines = [
+      'Ошибка: ' + (window._lastLoadError ? String(window._lastLoadError) : 'нет данных'),
+      'supabase: ' + typeof window.supabase,
+      'WHApi: ' + typeof window.WHApi,
+      'UA: ' + navigator.userAgent.slice(0,80)
+    ];
+    // Быстрый fetch-тест в обход supabase-js
+    try{
+      const t0=Date.now();
+      const r=await Promise.race([
+        fetch('https://xkqaipggklmgussjphkp.supabase.co/rest/v1/workers?select=name&active=eq.true',
+          {headers:{apikey:'sb_publishable_h7zhxKris7gY8i-dxOvx4w__cxxPIRX'}}),
+        new Promise((_,rej)=>setTimeout(()=>rej(new Error('fetch timeout 8s')),8000))
+      ]);
+      diagLines.push('fetch test: ' + r.status + ' за ' + (Date.now()-t0) + 'мс');
+    }catch(fe){
+      diagLines.push('fetch test: ' + fe);
     }
+    errEl.innerHTML = diagLines.map(l=>`<div>${l}</div>`).join('');
+    errEl.style.display='block';
     return;
   }
 
