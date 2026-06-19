@@ -190,8 +190,9 @@ function _getData(cfg, worker) {
   var otherRows = _sbGet(cfg, 'visits?select=visitor,operation,visit_time,visit_date,worker,comment&is_other=eq.true&visit_date=gte.' + twoDaysAgo);
 
   // Резервный источник: visit_orders + visits — для визитов до внедрения order_status
-  var allVisits  = _sbGet(cfg, 'visits?select=id,operation,worker&is_other=eq.false&visit_date=gte.' + cutoff);
-  var allVorders = _sbGet(cfg, 'visit_orders?select=order_no,visit_id');
+  // limit=10000 чтобы не попасть под дефолтный лимит Supabase в 1000 строк
+  var allVisits  = _sbGet(cfg, 'visits?select=id,operation,worker&is_other=eq.false&visit_date=gte.' + cutoff + '&limit=10000');
+  var allVorders = _sbGet(cfg, 'visit_orders?select=order_no,visit_id&limit=10000');
   var visitMap   = {};
   allVisits.forEach(function(v) { visitMap[v.id] = v; });
 
@@ -238,9 +239,9 @@ function _getAll(cfg, fromDate) {
   var today  = mskToday();
   var cutoff = fromDate || _dateNDaysAgo(90);
 
-  var shifts   = _sbGet(cfg, 'shifts?select=*&shift_date=gte.' + cutoff + '&order=shift_date.desc');
-  var visits   = _sbGet(cfg, 'visits?select=*&visit_date=gte.' + cutoff);
-  var vorders  = _sbGet(cfg, 'visit_orders?select=*');
+  var shifts   = _sbGet(cfg, 'shifts?select=*&shift_date=gte.' + cutoff + '&order=shift_date.desc&limit=5000');
+  var visits   = _sbGet(cfg, 'visits?select=*&visit_date=gte.' + cutoff + '&limit=10000');
+  var vorders  = _sbGet(cfg, 'visit_orders?select=*&limit=10000');
   var orders   = _sbGet(cfg, 'orders?select=order_no,client,company,issue_date,issue_time,return_date,return_time,delivery_worker,site_status');
   var statuses = _sbGet(cfg, 'order_status?select=order_no,issued,returned,issued_by,returned_by');
 
@@ -363,7 +364,42 @@ function _deleteVisit(cfg, payload) {
   var shifts = _sbGet(cfg, 'shifts?select=id&worker=eq.' + encodeURIComponent(payload.worker) +
     '&start_at=eq.' + encodeURIComponent(payload.shiftStart) + '&limit=1');
   if (!shifts.length) return { ok: false, error: 'shift not found' };
-  _sbDelete(cfg, 'visits?shift_id=eq.' + shifts[0].id + '&visit_time=eq.' + encodeURIComponent(payload.timeAuto));
+  var shiftId = shifts[0].id;
+
+  // Найти конкретный визит (берём первый совпавший, чтобы не удалить несколько)
+  var matchingVisits = _sbGet(cfg, 'visits?select=id&shift_id=eq.' + shiftId +
+    '&visit_time=eq.' + encodeURIComponent(payload.timeAuto) + '&limit=1');
+  if (!matchingVisits.length) return { ok: false, error: 'visit not found' };
+  var visitId = matchingVisits[0].id;
+
+  // Узнать какие заказы были в этом визите, чтобы откатить order_status
+  var vorders = _sbGet(cfg, 'visit_orders?select=order_no&visit_id=eq.' + visitId);
+  var visit   = _sbGet(cfg, 'visits?select=operation&id=eq.' + visitId + '&limit=1');
+  var op = visit.length ? visit[0].operation : '';
+
+  // Удалить визит (visit_orders удалятся каскадно если настроен ON DELETE CASCADE,
+  // иначе удаляем явно)
+  _sbDelete(cfg, 'visit_orders?visit_id=eq.' + visitId);
+  _sbDelete(cfg, 'visits?id=eq.' + visitId);
+
+  // Откатить order_status: для каждого заказа визита проверяем есть ли другие записи
+  vorders.forEach(function(vo) {
+    if (!vo.order_no) return;
+    var orderOp = op;
+    // Проверяем есть ли ещё визиты с этим заказом
+    var otherIssue  = _sbGet(cfg, 'visit_orders?select=visit_id&order_no=eq.' + encodeURIComponent(vo.order_no) + '&limit=1');
+    if (otherIssue.length > 0) return; // есть другие записи — не откатываем
+    // Больше нет записей — сбрасываем статус
+    if (orderOp === 'issue' || orderOp === 'both') {
+      _sbPatch(cfg, 'order_status?order_no=eq.' + encodeURIComponent(vo.order_no),
+        { issued: false, issued_by: null });
+    }
+    if (orderOp === 'return' || orderOp === 'both') {
+      _sbPatch(cfg, 'order_status?order_no=eq.' + encodeURIComponent(vo.order_no),
+        { returned: false, returned_by: null });
+    }
+  });
+
   return { ok: true };
 }
 
