@@ -750,11 +750,14 @@ function renderOrders(){
     const timeInfo = o.issueTime||o.returnTime ? `<br><span style="font-size:10px;color:var(--muted)">${o.issueTime||o.returnTime}</span>` : '';
     const commentHtml = commentMap[o.id] ? `<br><span style="font-size:10px;color:var(--muted);font-style:italic">💬 ${commentMap[o.id]}</span>` : '';
     let overdueHint = '';
-    if(isOv && o.returnDate){
-      const rp = o.returnDate.split('.');
-      const retDate = rp.length===3 ? new Date(`${rp[2]}-${rp[1]}-${rp[0]}`) : null;
-      const days = retDate ? Math.floor((Date.now()-retDate)/86400000) : 0;
-      overdueHint = `<br><span style="font-size:10px;color:#c0392b">📅 возврат ${o.returnDate}${days>0?` · просрочен ${days} дн.`:''}</span>`;
+    if(isOv){
+      const isIssueOv = o.overdueType==='issue';
+      const dateStr = isIssueOv ? o.issueDate : o.returnDate;
+      const parts = dateStr ? dateStr.split('.') : [];
+      const ovDate = parts.length===3 ? new Date(`${parts[2]}-${parts[1]}-${parts[0]}`) : null;
+      const days = ovDate ? Math.floor((Date.now()-ovDate)/86400000) : 0;
+      const lbl = isIssueOv ? 'выдача' : 'возврат';
+      overdueHint = `<br><span style="font-size:10px;color:#c0392b">📅 ${lbl} ${dateStr||''}${days>0?` · просрочен ${days} дн.`:''}</span>`;
     }
     const delBtn = `<button class="del-order-btn" onclick="deleteOrderUI(${jsq(o.id)},${jsq(o.client||'')})">🗑</button>`;
     return {done, html:`<tr${isOv?' style="background:rgba(231,76,60,.03)"':''}>

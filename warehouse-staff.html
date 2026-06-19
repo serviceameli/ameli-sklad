@@ -1047,13 +1047,16 @@ function tapRow(o, badgeCls, locked, forceType){
   const chkId=locked?`otap-chk-ret-${o.id}`:`otap-chk-${o.id}`;
   const clickAttr=locked?'style="opacity:0.4;pointer-events:none"':`onclick="tapOrder('${jsq(o.id)}'${forceType?`,'${forceType}'`:''})"`;
   const hint=locked?`<span style="font-size:10px;color:#888;margin-left:4px">— сначала выдайте</span>`:'';
-  // Для просроченных: показываем дату возврата и кол-во дней просрочки
+  // Для просроченных: показываем дату и кол-во дней просрочки
   let overdueHint='';
-  if(badgeCls==='ov' && o.returnDate){
-    const retParts=o.returnDate.split('.');
-    const retDate=retParts.length===3?new Date(`${retParts[2]}-${retParts[1]}-${retParts[0]}`):null;
-    const days=retDate?Math.floor((Date.now()-retDate)/86400000):0;
-    overdueHint=`<div style="font-size:10px;color:#c0392b;margin-top:1px">📅 возврат ${o.returnDate}${days>0?` · просрочен ${days} дн.`:''}</div>`;
+  if(badgeCls==='ov'){
+    const isIssueOv = o.overdueType==='issue';
+    const dateStr = isIssueOv ? o.issueDate : o.returnDate;
+    const parts = dateStr ? dateStr.split('.') : [];
+    const ovDate = parts.length===3 ? new Date(`${parts[2]}-${parts[1]}-${parts[0]}`) : null;
+    const days = ovDate ? Math.floor((Date.now()-ovDate)/86400000) : 0;
+    const label = isIssueOv ? 'выдача' : 'возврат';
+    overdueHint=`<div style="font-size:10px;color:#c0392b;margin-top:1px">📅 ${label} ${dateStr||''}${days>0?` · просрочен ${days} дн.`:''}</div>`;
   }
   return `<div class="otap" id="${rowId}" ${clickAttr}>
     <div class="otap-left">
@@ -1677,7 +1680,8 @@ function orderCard(o, modifier){
   const sameDayIssued=modifier==='sameday-issued';
   const isDoneReturn=eff==='done'&&(o.type==='return'||o.sameDay);
   const cls=locked?'return-due':sameDayIssued?'issued':eff==='done'&&isDoneReturn?'returned':eff==='done'?'issued':eff==='return'?'return-due':isOverdue?'overdue':'pending';
-  const txt=locked?'⏳ Сначала выдайте':sameDayIssued?'✓ Выдан · ↩ возврат сегодня':eff==='done'&&isDoneReturn?'✓ Возвращён':eff==='done'?'✓ Выдан':eff==='return'?'🔄 К возврату':isOverdue?'🔴 Просрочен':'⏳ Ожидает';
+  const overdueLabel = isOverdue ? (o.overdueType==='issue' ? '🔴 Просрочена выдача' : '🔴 Просрочен возврат') : '';
+  const txt=locked?'⏳ Сначала выдайте':sameDayIssued?'✓ Выдан · ↩ возврат сегодня':eff==='done'&&isDoneReturn?'✓ Возвращён':eff==='done'?'✓ Выдан':eff==='return'?'🔄 К возврату':isOverdue?overdueLabel:'⏳ Ожидает';
   const opacity=locked?'opacity:0.45;':'';
   const workerHint = sameDayIssued
     ? (o.issuedBy ? `<span class="oc-worker">👤 ${o.issuedBy}</span>` : '')
