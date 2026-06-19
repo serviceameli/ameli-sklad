@@ -159,13 +159,13 @@ function _buildOrders(rows, today, issuedSet, returnedSet) {
   rows.forEach(function(o) {
     var id = o.order_no, iss = o.issue_date || '', ret = o.return_date || '', b = _baseOf(o);
     if (todayIds[id]) return; // уже в сегодняшнем списке
-    if (iss && iss < today && !issuedSet[id] && !returnedSet[id] && !seen[id]) {
-      // Выдача не состоялась — просрочена выдача
-      overdue.push(_ext(b, { type: 'issue', sameDay: iss === ret, overdue: true, overdueType: 'issue' }));
-      seen[id] = true;
-    } else if (ret && ret < today && issuedSet[id] && !returnedSet[id] && !seen[id]) {
-      // Выдача была, возврат не состоялся — просрочен возврат
+    if (ret && ret < today && !returnedSet[id] && !seen[id]) {
+      // Дата возврата прошла и возврата нет → просрочен возврат (независимо от выдачи)
       overdue.push(_ext(b, { type: 'return', sameDay: false, overdue: true, overdueType: 'return' }));
+      seen[id] = true;
+    } else if (iss && iss < today && ret >= today && !issuedSet[id] && !todayIds[id] && !seen[id]) {
+      // Выдача в прошлом, возврат впереди, выдача не записана → просрочена выдача
+      overdue.push(_ext(b, { type: 'issue', sameDay: false, overdue: true, overdueType: 'issue' }));
       seen[id] = true;
     }
   });
