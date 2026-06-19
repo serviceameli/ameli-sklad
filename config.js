@@ -8,7 +8,7 @@
 const SCRIPT_URL = 'YOUR_SCRIPT_URL'; // боевые страницы → Supabase через api.js
 
 // URL Apps Script ТОЛЬКО для синхронизации заказов Google Sheets → Supabase
-const SYNC_URL = 'https://script.google.com/macros/s/AKfycbxkpMMPirB8B1aWQJvg3nfn2dR8epDSAWu2EM3NinXbg9q0IX9RHIwgonpuUGLMk1k/exec';
+const SYNC_URL = 'https://script.google.com/macros/s/AKfycbwr8IkaVfQiTj-1wL7sk-R6OH6npHyZY40wuP_MAQRdR2dQ5l2yIUMAPdslbTQTr3s/exec';
 
 // ── Supabase (новый бэкенд) ──────────────────────────────────────
 // Publishable key — публичный, для фронтенда. Secret key сюда НЕ кладём.
