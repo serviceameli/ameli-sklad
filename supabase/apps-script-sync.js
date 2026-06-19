@@ -184,10 +184,10 @@ function _getData(cfg, worker) {
   var twoDaysAgo = _dateNDaysAgo(2);
 
   var workers   = _sbGet(cfg, 'workers?select=name&active=eq.true');
-  var orders    = _sbGet(cfg, 'orders?select=order_no,client,company,issue_date,issue_time,return_date,return_time,delivery_worker,site_status&or=(issue_date.gte.' + cutoff + ',return_date.gte.' + cutoff + ')');
-  var statuses  = _sbGet(cfg, 'order_status?select=order_no,issued,returned,issued_by,returned_by');
+  var orders    = _sbGet(cfg, 'orders?select=order_no,client,company,issue_date,issue_time,return_date,return_time,delivery_worker,site_status&or=(issue_date.gte.' + cutoff + ',return_date.gte.' + cutoff + ')&limit=10000');
+  var statuses  = _sbGet(cfg, 'order_status?select=order_no,issued,returned,issued_by,returned_by&limit=10000');
   var draftRows = worker ? _sbGet(cfg, 'drafts?select=data&worker=eq.' + encodeURIComponent(worker) + '&limit=1') : [];
-  var otherRows = _sbGet(cfg, 'visits?select=visitor,operation,visit_time,visit_date,worker,comment&is_other=eq.true&visit_date=gte.' + twoDaysAgo);
+  var otherRows = _sbGet(cfg, 'visits?select=visitor,operation,visit_time,visit_date,worker,comment&is_other=eq.true&visit_date=gte.' + twoDaysAgo + '&limit=1000');
 
   // Резервный источник: visit_orders + visits — для визитов до внедрения order_status
   // limit=10000 чтобы не попасть под дефолтный лимит Supabase в 1000 строк
@@ -242,8 +242,8 @@ function _getAll(cfg, fromDate) {
   var shifts   = _sbGet(cfg, 'shifts?select=*&shift_date=gte.' + cutoff + '&order=shift_date.desc&limit=5000');
   var visits   = _sbGet(cfg, 'visits?select=*&visit_date=gte.' + cutoff + '&limit=10000');
   var vorders  = _sbGet(cfg, 'visit_orders?select=*&limit=10000');
-  var orders   = _sbGet(cfg, 'orders?select=order_no,client,company,issue_date,issue_time,return_date,return_time,delivery_worker,site_status');
-  var statuses = _sbGet(cfg, 'order_status?select=order_no,issued,returned,issued_by,returned_by');
+  var orders   = _sbGet(cfg, 'orders?select=order_no,client,company,issue_date,issue_time,return_date,return_time,delivery_worker,site_status&limit=10000');
+  var statuses = _sbGet(cfg, 'order_status?select=order_no,issued,returned,issued_by,returned_by&limit=10000');
 
   var voByVisit = {}, visByShift = {};
   vorders.forEach(function(o) {
@@ -473,7 +473,7 @@ function syncOrders() {
   var sheetsNos = {};
   rows.forEach(function(r) { sheetsNos[r.order_no] = true; });
   try {
-    var existing = _sbGet(cfg, 'orders?select=order_no');
+    var existing = _sbGet(cfg, 'orders?select=order_no&limit=10000');
     var toDelete = existing.map(function(r) { return r.order_no; }).filter(function(no) { return !sheetsNos[no]; });
     var deleted = 0;
     for (var d = 0; d < toDelete.length; d += 100) {

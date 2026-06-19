@@ -1557,7 +1557,7 @@ async function delVisit(i){
 
   // Отправляем удаление на сервер (fire-and-forget)
   if(shiftStart){
-    WHApi.deleteVisit({shiftStart:shiftStart.toISOString(),worker,timeAuto:visit.timeAuto||''}).catch(()=>{});
+    WHApi.deleteVisit({shiftStart:shiftStart.toISOString(),worker,timeAuto:visit.time||visit.timeAuto||''}).catch(()=>{});
   }
 
   visits.splice(i,1);
