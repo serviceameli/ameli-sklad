@@ -158,12 +158,15 @@ function _buildOrders(rows, today, issuedSet, returnedSet) {
   todayList.forEach(function(o) { todayIds[o.id] = true; });
   rows.forEach(function(o) {
     var id = o.order_no, iss = o.issue_date || '', ret = o.return_date || '', b = _baseOf(o);
-    if (iss && iss < today && !issuedSet[id] && !seen[id + '_i']) {
-      overdue.push(_ext(b, { type: 'issue', sameDay: iss === ret, overdue: true }));
-      seen[id + '_i'] = true;
-    } else if (ret && ret < today && issuedSet[id] && !returnedSet[id] && !seen[id + '_r']) {
+    if (ret && ret < today && !returnedSet[id] && !seen[id + '_r']) {
+      // Возврат просрочен (дата возврата прошла, а возврата нет) — реальная просрочка
       overdue.push(_ext(b, { type: 'return', sameDay: false, overdue: true }));
       seen[id + '_r'] = true;
+    } else if (iss && iss < today && ret >= today && !issuedSet[id] && !todayIds[id] && !seen[id + '_i']) {
+      // Выдача была до сегодня, возврат ещё впереди — считаем выдача была вне системы
+      // Показываем как «К возврату» если возврат сегодня (иначе появится в свой день)
+      if (ret === today) todayList.push(_ext(b, { type: 'return', sameDay: false }));
+      seen[id + '_i'] = true;
     }
   });
   return todayList.concat(overdue.filter(function(o) { return !todayIds[o.id]; }));
