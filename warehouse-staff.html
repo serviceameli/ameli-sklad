@@ -852,15 +852,15 @@ function showToast(msg, color){
 // ── LOAD ──
 async function loadData(workerParam){
   const attempt = () => {
-    const t = new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),25000));
+    const t = new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),12000));
     return Promise.race([WHApi.getData(workerParam), t]);
   };
   try{
     let j;
     try{ j = await attempt(); }
     catch(e1){
-      // Автоповтор один раз через 3 сек
-      await new Promise(r=>setTimeout(r,3000));
+      // Автоповтор один раз через 2 сек
+      await new Promise(r=>setTimeout(r,2000));
       j = await attempt();
     }
     workers=j.workers||[]; orders=j.orders||[];

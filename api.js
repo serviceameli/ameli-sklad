@@ -7,7 +7,10 @@
 (function (global) {
   let _client = null;
   function client() {
-    if (!_client) _client = global.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    if (!_client) _client = global.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+      realtime: { reconnectAfterMs: () => 999999999 }
+    });
     return _client;
   }
 
