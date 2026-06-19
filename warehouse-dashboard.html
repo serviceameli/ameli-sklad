@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Ameli Rental — Дашборд</title>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="vendor/chart.umd.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -526,7 +526,7 @@ table.dt tbody tr:last-child td{border-bottom:none}
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="vendor/supabase.min.js"></script>
 <script src="config.js?v=3"></script>
 <script src="api.js?v=3"></script>
 <script>
@@ -580,11 +580,18 @@ async function loadData(){
   if(document.getElementById('rfts')) document.getElementById('rfts').textContent='Загрузка...';
   const local = JSON.parse(localStorage.getItem('wh_shifts')||'[]');
   try{
-    const j=await WHApi.getAll();
+    // Берём самый длинный из активных периодов, чтобы все вкладки получили нужные данные
+    const maxDays = Math.max(statsPeriod, wPeriod, tsPeriod, logPeriod, hPeriod);
+    const fromDate = fmtMsk(new Date(mskNow().getTime() - maxDays * 864e5));
+    const j=await WHApi.getAll(fromDate);
     allShifts  = j.shifts||local;
     todayOrders= j.orders||[];
     if(j.processedOrders) serverProcessed={issued:j.processedOrders.issued||[],returned:j.processedOrders.returned||[],otherVisits:j.processedOrders.otherVisits||[]};
-  }catch(e){ allShifts=local; todayOrders=[]; }
+  }catch(e){
+    allShifts=local; todayOrders=[];
+    const ts=document.getElementById('rfts');
+    if(ts) ts.textContent='⚠️ Нет соединения — данные могут быть устаревшими';
+  }
 
   // Flatten: one record per VISIT (with all orders inside)
   allVisits=[];

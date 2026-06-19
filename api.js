@@ -75,10 +75,12 @@
   }
 
   // ── shifts: собирает смены с вложенными визитами (как getAllShifts) ──
-  async function buildShifts(sb) {
+  async function buildShifts(sb, fromDate) {
+    // fromDate = 'yyyy-mm-dd' — нижняя граница (по shift_date). Если не задана — 90 дней
+    const cutoff = fromDate || new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
     const [sh, vi, vo] = await Promise.all([
-      sb.from('shifts').select('*'),
-      sb.from('visits').select('*'),
+      sb.from('shifts').select('*').gte('shift_date', cutoff),
+      sb.from('visits').select('*').gte('visit_date', cutoff),
       sb.from('visit_orders').select('*')
     ]);
     const shifts = sh.data || [], visits = vi.data || [], vorders = vo.data || [];
@@ -107,13 +109,14 @@
   }
 
   // ── getAll: для дашборда ──
-  async function getAll() {
+  // fromDate — нижняя граница периода 'yyyy-mm-dd' (приходит из UI-селектора периода)
+  async function getAll(fromDate) {
     const sb = client();
     const today = mskToday();
     const [ord, st, shifts] = await Promise.all([
-      sb.from('orders').select('*'),
-      sb.from('order_status').select('*'),
-      buildShifts(sb)
+      sb.from('orders').select('order_no,client,company,issue_date,issue_time,return_date,return_time,delivery_worker,site_status,deleted_at'),
+      sb.from('order_status').select('order_no,issued,returned,issued_by,returned_by'),
+      buildShifts(sb, fromDate)
     ]);
 
     const issuedSet = new Set(), returnedSet = new Set(), issuedBy = {}, returnedBy = {};
@@ -137,8 +140,8 @@
 
     const [wk, ord, st, dr] = await Promise.all([
       sb.from('workers').select('name').eq('active', true),
-      sb.from('orders').select('*'),
-      sb.from('order_status').select('*'),
+      sb.from('orders').select('order_no,client,company,issue_date,issue_time,return_date,return_time,delivery_worker,site_status,deleted_at'),
+      sb.from('order_status').select('order_no,issued,returned,issued_by,returned_by'),
       worker
         ? sb.from('drafts').select('data').eq('worker', worker).maybeSingle()
         : Promise.resolve({ data: null })
@@ -165,7 +168,7 @@
     }));
 
     return {
-      workers: (wk.data || []).map(w => ({ name: w.name, pin: w.pin })),
+      workers: (wk.data || []).map(w => ({ name: w.name })),
       orders,
       processedOrders: {
         issued: [...issuedSet], returned: [...returnedSet],

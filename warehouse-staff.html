@@ -332,7 +332,7 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
 .order-card.overdue{border-left-color:#E74C3C}
 .oc-status.overdue{background:rgba(231,76,60,.15);color:#c0392b;animation:pulse 2s infinite}
 </style>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="vendor/supabase.min.js"></script>
   <script src="config.js?v=3"></script>
   <script src="api.js?v=3"></script>
 </head>
@@ -584,6 +584,13 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
 // URL берётся из файла config.js (лежит рядом с этим файлом)
 const MSK_OFFSET  = 3;
 const NIGHT_START = 22, NIGHT_END = 9;
+
+// Безопасная обёртка localStorage (Safari приватный режим, переполненное хранилище)
+const LS = {
+  get(key, fallback){ try{ const v=localStorage.getItem(key); return v===null?(fallback===undefined?null:fallback):v; }catch(e){ return fallback===undefined?null:fallback; } },
+  set(key, val){ try{ localStorage.setItem(key, val); return true; }catch(e){ return false; } },
+  remove(key){ try{ localStorage.removeItem(key); }catch(e){} }
+};
 // DRAFT_KEY убран — используем draftKey() который зависит от имени кладовщика
 const AUTOSAVE_INT= 15000;
 const ICONS = ['👩','👨','🧑','👩','👩','👨'];
@@ -646,7 +653,7 @@ async function init(){
       personalWorkerUrl = found.name;
       worker = found.name;
       // Ищем черновик: сначала localStorage, затем с сервера
-      const draftRaw = localStorage.getItem(draftKey())
+      const draftRaw = LS.get(draftKey())
         || (serverDraft ? JSON.stringify(serverDraft) : null);
 
       if(draftRaw){
@@ -661,7 +668,7 @@ async function init(){
             }
             return;
           }
-        }catch(e){ localStorage.removeItem(draftKey()); }
+        }catch(e){ LS.remove(draftKey()); }
       }
       // Нет черновика → welcome
       showWelcomeScreen(found);
@@ -842,7 +849,7 @@ async function loadData(workerParam){
 function saveDraft(){
   if(!worker) return;
   const draft={worker,shiftStart:shiftStart?.toISOString()||null,visits,isNight:isNight()?'Ночь':'День',savedAt:new Date().toISOString()};
-  localStorage.setItem(draftKey(),JSON.stringify(draft));
+  LS.set(draftKey(),JSON.stringify(draft));
   WHApi.saveDraft({...draft,isDraft:true,shiftDate:new Date().toLocaleDateString('ru'),totalEntries:visits.length,entries:visits}).catch(()=>{});
 }
 function startAutosave(){ stopAutosave(); autosaveTimer=setInterval(saveDraft,AUTOSAVE_INT); }
@@ -850,7 +857,7 @@ function stopAutosave(){ if(autosaveTimer){clearInterval(autosaveTimer);autosave
 
 // Проверяет черновик из localStorage ИЛИ с сервера (serverDraft)
 function checkForDraft(serverDraft){
-  const raw = localStorage.getItem(draftKey()) || (serverDraft ? JSON.stringify(serverDraft) : null);
+  const raw = LS.get(draftKey()) || (serverDraft ? JSON.stringify(serverDraft) : null);
   if(!raw) return false;
   try{
     const d=JSON.parse(raw);
@@ -860,7 +867,7 @@ function checkForDraft(serverDraft){
     document.getElementById('restoreInfo').textContent=`${d.visits.length} ${pl(d.visits.length,'визит','визита','визитов')} · ${hrs} ч. назад`;
     el.classList.add('show'); el.dataset.draft=raw;
     return true;
-  }catch(e){ localStorage.removeItem(draftKey()); return false; }
+  }catch(e){ LS.remove(draftKey()); return false; }
 }
 function restoreShift(){
   const raw=document.getElementById('restoreBanner').dataset.draft;
@@ -879,13 +886,13 @@ function restoreShift(){
   renderTable(); updateOrdersBar(); renderOrderCards();
   startAutosave();
 }
-function discardDraft(){ localStorage.removeItem(draftKey()); document.getElementById('restoreBanner').classList.remove('show'); }
+function discardDraft(){ LS.remove(draftKey()); document.getElementById('restoreBanner').classList.remove('show'); }
 
 // ── RESTORE DIRECT (без баннера, для персональной ссылки) ──
 function restoreShiftDirect(draft){
   visits=draft.visits||[];
   shiftStart=draft.shiftStart?new Date(draft.shiftStart):new Date();
-  localStorage.setItem(draftKey(), JSON.stringify(draft));
+  LS.set(draftKey(), JSON.stringify(draft));
   document.getElementById('shiftWho').innerHTML=worker+`<span>· восстановлено</span>`;
   updateShiftInfoCard();
   showScreen('s-shift');
@@ -1414,17 +1421,17 @@ function postVisitPayload(payload){
 }
 function queuePendingVisit(payload){
   try{
-    const q=JSON.parse(localStorage.getItem(PENDING_KEY)||'[]');
+    const q=JSON.parse(LS.get(PENDING_KEY)||'[]');
     q.push(payload);
-    localStorage.setItem(PENDING_KEY,JSON.stringify(q));
+    LS.set(PENDING_KEY,JSON.stringify(q));
     showToast('⚠️ Нет сети — визит будет отправлен позже','var(--yandex)');
   }catch(e){}
 }
 function flushPendingVisits(){
   let q=[];
-  try{ q=JSON.parse(localStorage.getItem(PENDING_KEY)||'[]'); }catch(e){}
+  try{ q=JSON.parse(LS.get(PENDING_KEY)||'[]'); }catch(e){}
   if(!q.length) return;
-  localStorage.setItem(PENDING_KEY,'[]');
+  LS.set(PENDING_KEY,'[]');
   q.forEach(p=>postVisitPayload(p));
 }
 window.addEventListener('online',flushPendingVisits);
@@ -1720,10 +1727,10 @@ async function confirmSubmit(){
       timestamp:v.ts, night:v.night?'Ночь':'День'
     }))
   };
-  const s=JSON.parse(localStorage.getItem('wh_shifts')||'[]'); s.push(payload);
+  const s=JSON.parse(LS.get('wh_shifts')||'[]'); s.push(payload);
   if(s.length>20) s.splice(0, s.length-20); // не даём localStorage расти бесконечно
-  localStorage.setItem('wh_shifts',JSON.stringify(s));
-  localStorage.removeItem(draftKey());
+  LS.set('wh_shifts',JSON.stringify(s));
+  LS.remove(draftKey());
   try{await WHApi.closeShift(payload)}catch(e){console.error('closeShift failed',e)}
   showSuccess(payload);
 }
