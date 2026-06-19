@@ -468,23 +468,7 @@ function syncOrders() {
     if (lastCode >= 200 && lastCode < 300) synced += batch.length; else break;
   }
   if (lastCode < 200 || lastCode >= 300) return { ok: false, synced: synced, code: lastCode, error: lastBody };
-
-  // Удаляем из Supabase заказы, которых больше нет в Sheets
-  var sheetsNos = {};
-  rows.forEach(function(r) { sheetsNos[r.order_no] = true; });
-  try {
-    var existing = _sbGet(cfg, 'orders?select=order_no&limit=10000');
-    var toDelete = existing.map(function(r) { return r.order_no; }).filter(function(no) { return !sheetsNos[no]; });
-    var deleted = 0;
-    for (var d = 0; d < toDelete.length; d += 100) {
-      var batch = toDelete.slice(d, d + 100);
-      _sbDelete(cfg, 'orders?order_no=in.(' + batch.join(',') + ')');
-      deleted += batch.length;
-    }
-    return { ok: true, synced: synced, deleted: deleted };
-  } catch(e) {
-    return { ok: true, synced: synced, deleteError: e.toString() };
-  }
+  return { ok: true, synced: synced };
 }
 
 function setupSyncTrigger() {
