@@ -373,7 +373,8 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
   <div id="loadingError" style="display:none">
     <div style="font-size:32px;margin-bottom:12px">📡</div>
     <div style="font-size:14px;font-weight:700;color:#2D2D2D;margin-bottom:6px">Нет соединения</div>
-    <div style="font-size:12px;color:#888;margin-bottom:24px">Не удалось загрузить данные.<br>Проверь интернет и попробуй снова.</div>
+    <div style="font-size:12px;color:#888;margin-bottom:12px">Не удалось загрузить данные.<br>Проверь интернет и попробуй снова.</div>
+    <div id="loadingErrorDetail" style="display:none;font-size:11px;color:#c0392b;background:#fff0f0;border:1px solid #f5c6cb;border-radius:8px;padding:10px 12px;margin-bottom:16px;text-align:left;word-break:break-all;max-height:120px;overflow-y:auto"></div>
     <button onclick="retryInit()" style="background:#1A1A1A;color:#fff;border:none;border-radius:13px;padding:14px 28px;font-family:'Montserrat',sans-serif;font-size:14px;font-weight:700;cursor:pointer">↺ Повторить</button>
   </div>
 </div>
@@ -640,6 +641,11 @@ async function init(){
   if(!workers.length && !orders.length){
     document.getElementById('loadingSpinner').style.display='none';
     document.getElementById('loadingError').style.display='block';
+    const errEl = document.getElementById('loadingErrorDetail');
+    if(window._lastLoadError){
+      errEl.textContent = String(window._lastLoadError);
+      errEl.style.display='block';
+    }
     return;
   }
 
@@ -841,6 +847,7 @@ async function loadData(workerParam){
     return j.draft || null; // черновик этого кладовщика с сервера
   }catch(e){
     workers=[]; orders=[];
+    window._lastLoadError = e;
     return null;
   }
 }
