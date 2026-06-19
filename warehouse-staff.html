@@ -642,25 +642,8 @@ async function init(){
     document.getElementById('loadingSpinner').style.display='none';
     document.getElementById('loadingError').style.display='block';
     const errEl = document.getElementById('loadingErrorDetail');
-    const diagLines = [
-      'Ошибка: ' + (window._lastLoadError ? String(window._lastLoadError) : 'нет данных'),
-      'supabase: ' + typeof window.supabase,
-      'WHApi: ' + typeof window.WHApi,
-      'UA: ' + navigator.userAgent.slice(0,80)
-    ];
-    // fetch-тест БЕЗ кастомных заголовков (apikey в URL — должен работать без preflight)
-    try{
-      const t0=Date.now();
-      const r=await Promise.race([
-        fetch('https://xkqaipggklmgussjphkp.supabase.co/rest/v1/workers?select=name&active=eq.true&apikey=sb_publishable_h7zhxKris7gY8i-dxOvx4w__cxxPIRX',
-          {credentials:'omit'}),
-        new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout 8s')),8000))
-      ]);
-      diagLines.push('fetch(no-hdr): ' + r.status + ' за ' + (Date.now()-t0) + 'мс');
-    }catch(fe){
-      diagLines.push('fetch(no-hdr): ' + fe);
-    }
-    errEl.innerHTML = diagLines.map(l=>`<div>${l}</div>`).join('');
+    const msg = window._lastLoadError ? String(window._lastLoadError) : 'нет данных';
+    errEl.innerHTML = `<div>Ошибка: ${msg}</div><div>WHApi: ${typeof window.WHApi}</div>`;
     errEl.style.display='block';
     return;
   }
@@ -1169,7 +1152,7 @@ function applyRecentDeletions(){
 
 async function refreshOrdersFromServer(){
   try{
-    const j=await WHApi.getData(null);
+    const j=await WHApi.getData(personalWorkerUrl || null);
     if(j.orders){
       orders=j.orders;
       serverIssuedToday   = new Set(j.processedOrders?.issued   || []);
@@ -1463,8 +1446,16 @@ function flushPendingVisits(){
   let q=[];
   try{ q=JSON.parse(LS.get(PENDING_KEY)||'[]'); }catch(e){}
   if(!q.length) return;
-  LS.set(PENDING_KEY,'[]');
-  q.forEach(p=>postVisitPayload(p));
+  // Очищаем очередь только после успешной отправки каждого элемента
+  q.forEach(p=>{
+    WHApi.addVisit(p).then(()=>{
+      try{
+        const cur=JSON.parse(LS.get(PENDING_KEY)||'[]');
+        const idx=cur.findIndex(x=>x.entry&&p.entry&&x.entry.timeAuto===p.entry.timeAuto);
+        if(idx>=0){ cur.splice(idx,1); LS.set(PENDING_KEY,JSON.stringify(cur)); }
+      }catch(e){}
+    }).catch(()=>{}); // не удалось — остаётся в очереди
+  });
 }
 window.addEventListener('online',flushPendingVisits);
 
