@@ -5,26 +5,22 @@
 //  Требует: supabase-js (CDN) + config.js (SUPABASE_URL, SUPABASE_KEY).
 // ═══════════════════════════════════════════════════════════════
 (function (global) {
-  // Для GET: полностью чистый fetch без кастомных заголовков (только apikey в URL).
-  // Supabase-js добавляет X-Client-Info, Prefer, Authorization — все они триггерят CORS preflight.
-  // Простой GET без нестандартных заголовков preflight не требует.
-  function noPrefetchFetch(url, options) {
-    const method = (options && options.method || 'GET').toUpperCase();
-    if (method === 'GET' || method === 'HEAD') {
-      const sep = url.includes('?') ? '&' : '?';
-      const newUrl = url + sep + 'apikey=' + encodeURIComponent(SUPABASE_KEY);
-      // Полностью чистый запрос — никаких кастомных заголовков
-      return fetch(newUrl, { method: method, credentials: 'omit' });
-    }
-    return fetch(url, options);
+  // sfetch: чистый GET к Supabase REST без кастомных заголовков (нет CORS preflight).
+  // apikey передаётся как URL-параметр — Supabase это поддерживает.
+  function sfetch(table, query) {
+    const url = SUPABASE_URL + '/rest/v1/' + table + '?' + query + '&apikey=' + encodeURIComponent(SUPABASE_KEY);
+    return fetch(url, { credentials: 'omit' }).then(function(r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + table);
+      return r.json();
+    });
   }
 
+  // supabase-js клиент — только для записей (POST/PATCH/DELETE)
   let _client = null;
   function client() {
     if (!_client) _client = global.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
       auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
-      realtime: { reconnectAfterMs: () => 999999999 },
-      global: { fetch: noPrefetchFetch }
+      realtime: { reconnectAfterMs: () => 999999999 }
     });
     return _client;
   }
@@ -92,16 +88,14 @@
     return [...todayList, ...overdue.filter(o => !todayIds.has(o.id))];
   }
 
-  // ── shifts: собирает смены с вложенными визитами (как getAllShifts) ──
-  async function buildShifts(sb, fromDate) {
-    // fromDate = 'yyyy-mm-dd' — нижняя граница (по shift_date). Если не задана — 90 дней
+  // ── buildShifts: собирает смены с визитами (для дашборда) ──
+  async function buildShifts(fromDate) {
     const cutoff = fromDate || new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
-    const [sh, vi, vo] = await Promise.all([
-      sb.from('shifts').select('*').gte('shift_date', cutoff),
-      sb.from('visits').select('*').gte('visit_date', cutoff),
-      sb.from('visit_orders').select('*')
+    const [shifts, visits, vorders] = await Promise.all([
+      sfetch('shifts', 'select=*&shift_date=gte.' + cutoff + '&order=shift_date.desc'),
+      sfetch('visits', 'select=*&visit_date=gte.' + cutoff),
+      sfetch('visit_orders', 'select=*')
     ]);
-    const shifts = sh.data || [], visits = vi.data || [], vorders = vo.data || [];
 
     const voByVisit = {};
     vorders.forEach(o => { (voByVisit[o.visit_id] = voByVisit[o.visit_id] || []).push(o); });
@@ -127,23 +121,21 @@
   }
 
   // ── getAll: для дашборда ──
-  // fromDate — нижняя граница периода 'yyyy-mm-dd' (приходит из UI-селектора периода)
   async function getAll(fromDate) {
-    const sb = client();
     const today = mskToday();
     const [ord, st, shifts] = await Promise.all([
-      sb.from('orders').select('order_no,client,company,issue_date,issue_time,return_date,return_time,delivery_worker,site_status'),
-      sb.from('order_status').select('order_no,issued,returned,issued_by,returned_by'),
-      buildShifts(sb, fromDate)
+      sfetch('orders', 'select=order_no,client,company,issue_date,issue_time,return_date,return_time,delivery_worker,site_status'),
+      sfetch('order_status', 'select=order_no,issued,returned,issued_by,returned_by'),
+      buildShifts(fromDate)
     ]);
 
     const issuedSet = new Set(), returnedSet = new Set(), issuedBy = {}, returnedBy = {};
-    (st.data || []).forEach(r => {
+    st.forEach(r => {
       if (r.issued) { issuedSet.add(r.order_no); if (r.issued_by) issuedBy[r.order_no] = r.issued_by; }
       if (r.returned) { returnedSet.add(r.order_no); if (r.returned_by) returnedBy[r.order_no] = r.returned_by; }
     });
 
-    const orders = buildOrders(ord.data || [], today, issuedSet, returnedSet);
+    const orders = buildOrders(ord, today, issuedSet, returnedSet);
     return {
       shifts,
       orders,
@@ -151,51 +143,41 @@
     };
   }
 
-  // ── getData: для страницы кладовщика (аналог Apps Script getData) ──
+  // ── getData: для страницы кладовщика ──
   async function getData(worker) {
-    const sb = client();
     const today = mskToday();
-    // Берём заказы только за последние 60 дней — снижает трафик на мобиле
     const cutoff = new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 10);
+    const twoDaysAgo = new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10);
 
-    const [wk, ord, st, dr] = await Promise.all([
-      sb.from('workers').select('name').eq('active', true),
-      sb.from('orders').select('order_no,client,company,issue_date,issue_time,return_date,return_time,delivery_worker,site_status')
-        .or(`issue_date.gte.${cutoff},return_date.gte.${cutoff}`),
-      sb.from('order_status').select('order_no,issued,returned,issued_by,returned_by'),
+    const [wk, ord, st, dr, otherRows] = await Promise.all([
+      sfetch('workers', 'select=name&active=eq.true'),
+      sfetch('orders', 'select=order_no,client,company,issue_date,issue_time,return_date,return_time,delivery_worker,site_status&or=(issue_date.gte.' + cutoff + ',return_date.gte.' + cutoff + ')'),
+      sfetch('order_status', 'select=order_no,issued,returned,issued_by,returned_by'),
       worker
-        ? sb.from('drafts').select('data').eq('worker', worker).maybeSingle()
-        : Promise.resolve({ data: null })
+        ? sfetch('drafts', 'select=data&worker=eq.' + encodeURIComponent(worker) + '&limit=1')
+        : Promise.resolve([]),
+      sfetch('visits', 'select=visitor,operation,visit_time,visit_date,worker,comment&is_other=eq.true&visit_date=gte.' + twoDaysAgo)
     ]);
 
     const issuedSet = new Set(), returnedSet = new Set(), issuedBy = {}, returnedBy = {};
-    (st.data || []).forEach(r => {
+    st.forEach(r => {
       if (r.issued) { issuedSet.add(r.order_no); if (r.issued_by) issuedBy[r.order_no] = r.issued_by; }
       if (r.returned) { returnedSet.add(r.order_no); if (r.returned_by) returnedBy[r.order_no] = r.returned_by; }
     });
 
-    const orders = buildOrders(ord.data || [], today, issuedSet, returnedSet);
-
-    // «Не из списка» — визиты is_other за последние 2 дня (чтобы видеть их после закрытия смены)
-    const twoDaysAgo = new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10);
-    const otherQ = await sb.from('visits')
-      .select('visitor,operation,visit_time,visit_date,worker,comment')
-      .eq('is_other', true)
-      .gte('visit_date', twoDaysAgo);
-    const otherVisits = (otherQ.data || []).map(v => ({
+    const orders = buildOrders(ord, today, issuedSet, returnedSet);
+    const otherVisits = otherRows.map(v => ({
       visitor: v.visitor, operation: v.operation,
       time: fmtVisitTime(v.visit_time), date: v.visit_date,
       worker: v.worker, comment: v.comment || ''
     }));
+    const draftRow = dr[0];
 
     return {
-      workers: (wk.data || []).map(w => ({ name: w.name })),
+      workers: wk.map(w => ({ name: w.name })),
       orders,
-      processedOrders: {
-        issued: [...issuedSet], returned: [...returnedSet],
-        issuedBy, returnedBy, otherVisits
-      },
-      draft: dr.data ? dr.data.data : null
+      processedOrders: { issued: [...issuedSet], returned: [...returnedSet], issuedBy, returnedBy, otherVisits },
+      draft: draftRow ? draftRow.data : null
     };
   }
 
@@ -303,23 +285,19 @@
 
   // Сверка: визиты is_other за 7 дней + заказы без записи в логе
   async function getUnmatched() {
-    const sb = client();
     const today = mskToday();
     const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
 
-    const [vi, vo, sh, ord, st] = await Promise.all([
-      sb.from('visits').select('*').eq('is_other', true).gte('visit_date', sevenDaysAgo),
-      sb.from('visit_orders').select('*'),
-      sb.from('shifts').select('*'),
-      sb.from('orders').select('*'),
-      sb.from('order_status').select('*')
+    const [visits, vorders, shifts, orders, statuses] = await Promise.all([
+      sfetch('visits', 'select=*&is_other=eq.true&visit_date=gte.' + sevenDaysAgo),
+      sfetch('visit_orders', 'select=*'),
+      sfetch('shifts', 'select=*'),
+      sfetch('orders', 'select=*'),
+      sfetch('order_status', 'select=*')
     ]);
 
-    const visits = vi.data || [], vorders = vo.data || [], shifts = sh.data || [];
-    const orders = ord.data || [], statuses = st.data || [];
-
     const shiftById = {};
-    shifts.forEach(s => { shiftById[s.id] = s; });
+    (shifts||[]).forEach(s => { shiftById[s.id] = s; });
 
     const voByVisit = {};
     vorders.forEach(o => { (voByVisit[o.visit_id] = voByVisit[o.visit_id] || []).push(o); });
@@ -372,16 +350,15 @@
     const { visitKey, orderIds } = payload;
     if (!visitKey || !orderIds || !orderIds.length) return { success: false, error: 'no data' };
 
-    const vis = await sb.from('visits').select('id,shift_id').eq('id', visitKey).maybeSingle();
-    if (!vis.data) return { success: false, error: 'visit not found' };
+    const visRows = await sfetch('visits', 'select=id,shift_id&id=eq.' + encodeURIComponent(visitKey) + '&limit=1');
+    if (!visRows.length) return { success: false, error: 'visit not found' };
 
-    const ordRows = await sb.from('orders').select('order_no,client,return_date,delivery_worker')
-      .in('order_no', orderIds);
+    const ordRows = await sfetch('orders', 'select=order_no,client,return_date,delivery_worker&order_no=in.(' + orderIds.map(encodeURIComponent).join(',') + ')');
     const ordMap = {};
-    (ordRows.data || []).forEach(o => { ordMap[o.order_no] = o; });
+    ordRows.forEach(o => { ordMap[o.order_no] = o; });
 
     const toInsert = orderIds.map(id => ({
-      visit_id: visitKey,
+      visit_id: visRows[0].id,
       order_no: id,
       client_snapshot: ordMap[id]?.client || '',
       return_date_snapshot: ordMap[id]?.return_date || null,
@@ -415,9 +392,7 @@
 
   // Список всех кладовщиков (включая архивных) для управления
   async function getWorkers() {
-    const { data, error } = await client().from('workers').select('name,active').order('name');
-    if (error) throw error;
-    return data || [];
+    return sfetch('workers', 'select=name,active&order=name.asc');
   }
 
   // Добавить кладовщика
@@ -436,13 +411,12 @@
 
   // История смен конкретного кладовщика с вложенными визитами
   async function getWorkerHistory(workerName) {
-    const sb = client();
-    const [sh, vi, vo] = await Promise.all([
-      sb.from('shifts').select('*').eq('worker', workerName).order('start_at', { ascending: false }),
-      sb.from('visits').select('*').eq('worker', workerName),
-      sb.from('visit_orders').select('*')
+    const wEnc = encodeURIComponent(workerName);
+    const [shifts, visits, vorders] = await Promise.all([
+      sfetch('shifts', 'select=*&worker=eq.' + wEnc + '&order=start_at.desc'),
+      sfetch('visits', 'select=*&worker=eq.' + wEnc),
+      sfetch('visit_orders', 'select=*')
     ]);
-    const shifts = sh.data || [], visits = vi.data || [], vorders = vo.data || [];
     const voByVisit = {};
     vorders.forEach(o => { (voByVisit[o.visit_id] = voByVisit[o.visit_id] || []).push(o); });
     const visByShift = {};
