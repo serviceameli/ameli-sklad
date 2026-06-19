@@ -1042,7 +1042,7 @@ function populateOrders(){
 }
 
 function tapRow(o, badgeCls, locked, forceType){
-  const label=badgeCls==='issue'?'Выдача':badgeCls==='ret'?'Возврат':'🔴 Просрочен';
+  const label=badgeCls==='issue'?'Выдача':badgeCls==='ret'?'Возврат':o.overdueType==='issue'?'🔴 Просрочена выдача':'🔴 Просрочен возврат';
   const rowId=locked?`otap-ret-${o.id}`:`otap-${o.id}`;
   const chkId=locked?`otap-chk-ret-${o.id}`:`otap-chk-${o.id}`;
   const clickAttr=locked?'style="opacity:0.4;pointer-events:none"':`onclick="tapOrder('${jsq(o.id)}'${forceType?`,'${forceType}'`:''})"`;

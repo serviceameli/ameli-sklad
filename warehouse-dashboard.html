@@ -739,7 +739,7 @@ function renderOrders(){
       ? `<span class="badge delivery">🚛 Наша</span>`
       : `<span class="badge self">🚶 Самовывоз</span>`;
     const statusBadge = isOv
-      ? `<span class="badge" style="background:rgba(231,76,60,.15);color:#c0392b">🔴 Просрочен</span>`
+      ? `<span class="badge" style="background:rgba(231,76,60,.15);color:#c0392b">🔴 ${o.overdueType==='issue'?'Просрочена выдача':'Просрочен возврат'}</span>`
       : s==='issued'
       ? `<span class="badge issued">✓ Выдан</span>`
       : s==='returned'
