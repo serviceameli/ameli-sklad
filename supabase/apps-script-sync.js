@@ -70,21 +70,39 @@ function _sbUpsert(cfg, table, body, onConflict) {
 }
 
 function _sbPatch(cfg, path, body) {
-  UrlFetchApp.fetch(cfg.url + '/rest/v1/' + path, {
+  var resp = UrlFetchApp.fetch(cfg.url + '/rest/v1/' + path, {
     method: 'patch',
     contentType: 'application/json',
     headers: { apikey: cfg.key, Authorization: 'Bearer ' + cfg.key, Prefer: 'return=minimal' },
     payload: JSON.stringify(body),
     muteHttpExceptions: true
   });
+  var code = resp.getResponseCode();
+  if (code < 200 || code >= 300) throw new Error('PATCH ' + path + ' → ' + code + ': ' + resp.getContentText().slice(0, 200));
 }
 
 function _sbDelete(cfg, path) {
-  UrlFetchApp.fetch(cfg.url + '/rest/v1/' + path, {
+  var resp = UrlFetchApp.fetch(cfg.url + '/rest/v1/' + path, {
     method: 'delete',
     headers: { apikey: cfg.key, Authorization: 'Bearer ' + cfg.key },
     muteHttpExceptions: true
   });
+  var code = resp.getResponseCode();
+  if (code < 200 || code >= 300) throw new Error('DELETE ' + path + ' → ' + code + ': ' + resp.getContentText().slice(0, 200));
+}
+
+function _sbRpc(cfg, name, body) {
+  var resp = UrlFetchApp.fetch(cfg.url + '/rest/v1/rpc/' + name, {
+    method: 'post',
+    contentType: 'application/json',
+    headers: { apikey: cfg.key, Authorization: 'Bearer ' + cfg.key },
+    payload: JSON.stringify(body),
+    muteHttpExceptions: true
+  });
+  var code = resp.getResponseCode();
+  if (code < 200 || code >= 300) throw new Error('RPC ' + name + ' → ' + code + ': ' + resp.getContentText().slice(0, 300));
+  var text = resp.getContentText();
+  return text ? JSON.parse(text) : { ok: true };
 }
 
 // ─── Дата-хелперы ────────────────────────────────────────────
@@ -148,28 +166,24 @@ function _baseOf(o) {
 }
 
 function _buildOrders(rows, today, issuedSet, returnedSet) {
-  var todayList = [], overdue = [], seen = {}, todayIds = {};
+  var result = [], seen = {};
   rows.forEach(function(o) {
-    var iss = o.issue_date || '', ret = o.return_date || '', b = _baseOf(o);
-    if (iss === today && ret === today) todayList.push(_ext(b, { type: 'issue', sameDay: true }));
-    else if (iss === today)            todayList.push(_ext(b, { type: 'issue', sameDay: false }));
-    else if (ret === today)            todayList.push(_ext(b, { type: 'return', sameDay: false }));
-  });
-  todayList.forEach(function(o) { todayIds[o.id] = true; });
-  rows.forEach(function(o) {
-    var id = o.order_no, iss = o.issue_date || '', ret = o.return_date || '', b = _baseOf(o);
-    if (todayIds[id]) return; // уже в сегодняшнем списке
-    if (ret && ret < today && !returnedSet[id] && !seen[id]) {
-      // Дата возврата прошла и возврата нет → просрочен возврат (независимо от выдачи)
-      overdue.push(_ext(b, { type: 'return', sameDay: false, overdue: true, overdueType: 'return' }));
-      seen[id] = true;
-    } else if (iss && iss < today && ret >= today && !issuedSet[id] && !todayIds[id] && !seen[id]) {
-      // Выдача в прошлом, возврат впереди, выдача не записана → просрочена выдача
-      overdue.push(_ext(b, { type: 'issue', sameDay: false, overdue: true, overdueType: 'issue' }));
-      seen[id] = true;
+    var id = o.order_no, iss = o.issue_date || '', ret = o.return_date || '';
+    if (!id || seen[id] || returnedSet[id] || o.source_active === false) return;
+    seen[id] = true;
+    var sameDay = !!iss && iss === ret;
+    var type = null, overdue = false;
+    if (!issuedSet[id] && iss && iss <= today) {
+      type = 'issue'; overdue = iss < today;
+    } else if (issuedSet[id] && !returnedSet[id] && ret && ret <= today) {
+      type = 'return'; overdue = ret < today;
     }
+    if (type) result.push(_ext(_baseOf(o), {
+      type: type, sameDay: sameDay, overdue: overdue,
+      overdueType: overdue ? type : null, lifecycle: type === 'issue' ? 'awaiting_issue' : 'with_client'
+    }));
   });
-  return todayList.concat(overdue.filter(function(o) { return !todayIds[o.id]; }));
+  return result;
 }
 
 function _ext(obj, extra) {
@@ -180,39 +194,15 @@ function _ext(obj, extra) {
 
 function _getData(cfg, worker) {
   var today = mskToday();
-  var cutoff = _dateNDaysAgo(60);
   var twoDaysAgo = _dateNDaysAgo(2);
 
   var workers   = _sbGet(cfg, 'workers?select=name&active=eq.true');
-  var orders    = _sbGet(cfg, 'orders?select=order_no,client,company,issue_date,issue_time,return_date,return_time,delivery_worker,site_status&or=(issue_date.gte.' + cutoff + ',return_date.gte.' + cutoff + ')&limit=10000');
+  var orders    = _sbGet(cfg, 'orders?select=order_no,client,company,issue_date,issue_time,return_date,return_time,delivery_worker,site_status,source_active&source_active=eq.true&limit=10000');
   var statuses  = _sbGet(cfg, 'order_status?select=order_no,issued,returned,issued_by,returned_by&limit=10000');
   var draftRows = worker ? _sbGet(cfg, 'drafts?select=data&worker=eq.' + encodeURIComponent(worker) + '&limit=1') : [];
-  var otherRows = _sbGet(cfg, 'visits?select=visitor,operation,visit_time,visit_date,worker,comment&is_other=eq.true&visit_date=gte.' + twoDaysAgo + '&limit=1000');
-
-  // Резервный источник: visit_orders + visits — для визитов до внедрения order_status
-  // limit=10000 чтобы не попасть под дефолтный лимит Supabase в 1000 строк
-  var allVisits  = _sbGet(cfg, 'visits?select=id,operation,worker&is_other=eq.false&visit_date=gte.' + cutoff + '&limit=10000');
-  var allVorders = _sbGet(cfg, 'visit_orders?select=order_no,visit_id&limit=10000');
-  var visitMap   = {};
-  allVisits.forEach(function(v) { visitMap[v.id] = v; });
+  var otherRows = _sbGet(cfg, 'visits?select=id,visitor,operation,visit_time,visit_date,worker,comment&is_other=eq.true&visit_date=gte.' + twoDaysAgo + '&limit=1000');
 
   var issuedSet = {}, returnedSet = {}, issuedBy = {}, returnedBy = {};
-  // Сначала — данные из visit_orders (исторические)
-  allVorders.forEach(function(vo) {
-    if (!vo.order_no) return;
-    var v = visitMap[vo.visit_id];
-    if (!v) return;
-    var op = v.operation || '';
-    if (op === 'issue' || op === 'both') {
-      issuedSet[vo.order_no] = true;
-      if (v.worker && !issuedBy[vo.order_no]) issuedBy[vo.order_no] = v.worker;
-    }
-    if (op === 'return' || op === 'both') {
-      returnedSet[vo.order_no] = true;
-      if (v.worker && !returnedBy[vo.order_no]) returnedBy[vo.order_no] = v.worker;
-    }
-  });
-  // Потом — order_status перезаписывает (более точные данные для новых визитов)
   statuses.forEach(function(r) {
     if (r.issued)   { issuedSet[r.order_no] = true;   if (r.issued_by)   issuedBy[r.order_no]   = r.issued_by;   }
     if (r.returned) { returnedSet[r.order_no] = true; if (r.returned_by) returnedBy[r.order_no] = r.returned_by; }
@@ -225,7 +215,7 @@ function _getData(cfg, worker) {
       issued: Object.keys(issuedSet), returned: Object.keys(returnedSet),
       issuedBy: issuedBy, returnedBy: returnedBy,
       otherVisits: otherRows.map(function(v) {
-        return { visitor: v.visitor, operation: v.operation, time: _fmtTime(v.visit_time),
+        return { id: v.id, visitId: v.id, visitor: v.visitor, operation: v.operation, time: _fmtTime(v.visit_time),
                  date: v.visit_date, worker: v.worker, comment: v.comment || '' };
       })
     },
@@ -242,7 +232,7 @@ function _getAll(cfg, fromDate) {
   var shifts   = _sbGet(cfg, 'shifts?select=*&shift_date=gte.' + cutoff + '&order=shift_date.desc&limit=5000');
   var visits   = _sbGet(cfg, 'visits?select=*&visit_date=gte.' + cutoff + '&limit=10000');
   var vorders  = _sbGet(cfg, 'visit_orders?select=*&limit=10000');
-  var orders   = _sbGet(cfg, 'orders?select=order_no,client,company,issue_date,issue_time,return_date,return_time,delivery_worker,site_status&limit=10000');
+  var orders   = _sbGet(cfg, 'orders?select=order_no,client,company,issue_date,issue_time,return_date,return_time,delivery_worker,site_status,source_active&source_active=eq.true&limit=10000');
   var statuses = _sbGet(cfg, 'order_status?select=order_no,issued,returned,issued_by,returned_by&limit=10000');
 
   var voByVisit = {}, visByShift = {};
@@ -258,17 +248,18 @@ function _getAll(cfg, fromDate) {
   var builtShifts = shifts.map(function(s) {
     var svs = visByShift[s.id] || [];
     return {
-      shiftDate: s.shift_date, shiftStart: s.start_at, shiftEnd: s.end_at,
+      id: s.id, shiftId: s.id, shiftDate: s.shift_date, shiftStart: s.start_at, shiftEnd: s.end_at,
       worker: s.worker, isNight: s.is_night ? 'Ночь' : 'День',
       totalEntries: svs.length,
       entries: svs.map(function(v) {
         return {
+          id: v.id, visitId: v.id,
           visitor: v.visitor, operation: v.operation, timestamp: s.start_at,
           time: _fmtTime(v.visit_time), timeAuto: _fmtTime(v.visit_time),
           night: v.is_night ? 'Ночь' : 'День', comment: v.comment || '',
           date: v.visit_date || '', isOther: !!v.is_other,
           orders: (voByVisit[v.id] || []).filter(function(o) { return o.order_no; }).map(function(o) {
-            return { id: o.order_no, client: o.client_snapshot || '',
+            return { id: o.order_no, operation: o.operation || v.operation, client: o.client_snapshot || '',
                      returnDate: o.return_date_snapshot || '', delivery: o.delivery_snapshot || '' };
           })
         };
@@ -295,119 +286,60 @@ function _getAll(cfg, fromDate) {
 // ─── addVisit: записать визит + обновить order_status ────────
 
 function _addVisit(cfg, payload) {
-  var entry      = payload.entry;
-  var worker     = payload.worker;
-  var shiftStart = payload.shiftStart;
-  var isNight    = payload.isNight;
-  var shiftDateISO = _isoDate(payload.shiftDate);
-
-  // 1. Найти или создать смену
-  var existing = _sbGet(cfg, 'shifts?select=id&worker=eq.' + encodeURIComponent(worker) +
-    '&start_at=eq.' + encodeURIComponent(shiftStart) + '&limit=1');
-  var shiftId;
-  if (existing.length > 0) {
-    shiftId = existing[0].id;
-  } else {
-    var newShift = _sbPost(cfg, 'shifts', {
-      worker: worker, shift_date: shiftDateISO, start_at: shiftStart, is_night: isNight === 'Ночь'
-    }, 'return=representation');
-    if (!newShift || !newShift[0]) throw new Error('Не удалось создать смену');
-    shiftId = newShift[0].id;
-  }
-
-  // 2. Вставить визит
-  var hasOther  = (entry.orders || []).some(function(o) { return o.id === '__other__'; });
-  var visitDate = entry.date ? _isoDate(entry.date) : shiftDateISO;
-  var newVisit  = _sbPost(cfg, 'visits', {
-    shift_id: shiftId, worker: worker,
-    visitor: entry.visitor, operation: entry.operation,
-    visit_date: visitDate, visit_time: entry.time || entry.timeAuto || '',
-    is_night: entry.night === 'Ночь', is_other: hasOther,
-    comment: entry.comment || '', entered_at: new Date().toISOString()
-  }, 'return=representation');
-  if (!newVisit || !newVisit[0]) throw new Error('Не удалось создать визит');
-  var visitId = newVisit[0].id;
-
-  // 3. Вставить заказы визита
-  var vorders = [];
-  (entry.orders || []).forEach(function(o) {
-    if (o.id === '__other__') {
-      vorders.push({ visit_id: visitId, order_no: null,
-        client_snapshot: entry.orderClient || '', return_date_snapshot: null,
-        delivery_snapshot: entry.orderDelivery || '' });
-    } else {
-      vorders.push({ visit_id: visitId, order_no: o.id,
-        client_snapshot: o.client || '',
-        return_date_snapshot: o.returnDate ? _isoDate(o.returnDate) : null,
-        delivery_snapshot: o.delivery || '' });
-    }
+  if (!payload.clientEventId) throw new Error('clientEventId is required');
+  payload.shiftDate = _isoDate(payload.shiftDate);
+  payload.entry.date = _isoDate(payload.entry.date || payload.shiftDate);
+  (payload.entry.orders || []).forEach(function(o) {
+    if (o.returnDate) o.returnDate = _isoDate(o.returnDate);
+    if (!o.operation) o.operation = o.type || payload.entry.operation;
   });
-  if (vorders.length > 0) _sbPost(cfg, 'visit_orders', vorders, 'return=minimal');
-
-  // 4. Обновить order_status (КРИТИЧНЫЙ ФИX: статусы обновляются сразу)
-  var op = entry.operation;
-  (entry.orders || []).forEach(function(o) {
-    if (!o.id || o.id === '__other__') return;
-    var orderOp = (op === 'both') ? (o.type || 'issue') : op;
-    var upd;
-    if (orderOp === 'issue')  upd = { order_no: o.id, issued: true,  issued_by: worker };
-    if (orderOp === 'return') upd = { order_no: o.id, returned: true, returned_by: worker };
-    if (upd) _sbUpsert(cfg, 'order_status', upd, 'order_no');
-  });
-
-  return { ok: true, shiftId: shiftId, visitId: visitId };
+  return _sbRpc(cfg, 'record_warehouse_visit', { p_payload: payload });
 }
 
 // ─── deleteVisit ─────────────────────────────────────────────
 
 function _deleteVisit(cfg, payload) {
-  var shifts = _sbGet(cfg, 'shifts?select=id&worker=eq.' + encodeURIComponent(payload.worker) +
-    '&start_at=eq.' + encodeURIComponent(payload.shiftStart) + '&limit=1');
-  if (!shifts.length) return { ok: false, error: 'shift not found' };
-  var shiftId = shifts[0].id;
+  if (!payload.visitId) throw new Error('visitId is required');
+  return _sbRpc(cfg, 'delete_warehouse_visit', { p_visit_id: payload.visitId });
+}
 
-  // Найти конкретный визит (берём первый совпавший, чтобы не удалить несколько)
-  var matchingVisits = _sbGet(cfg, 'visits?select=id&shift_id=eq.' + shiftId +
-    '&visit_time=eq.' + encodeURIComponent(payload.timeAuto) + '&limit=1');
-  if (!matchingVisits.length) return { ok: false, error: 'visit not found' };
-  var visitId = matchingVisits[0].id;
+// ─── linkVisit: привязать «нет в списке» к заказам ──────────
 
-  // Узнать какие заказы были в этом визите, чтобы откатить order_status
-  var vorders = _sbGet(cfg, 'visit_orders?select=order_no&visit_id=eq.' + visitId);
-  var visit   = _sbGet(cfg, 'visits?select=operation&id=eq.' + visitId + '&limit=1');
-  var op = visit.length ? visit[0].operation : '';
-
-  // Удалить визит (visit_orders удалятся каскадно если настроен ON DELETE CASCADE,
-  // иначе удаляем явно)
-  _sbDelete(cfg, 'visit_orders?visit_id=eq.' + visitId);
-  _sbDelete(cfg, 'visits?id=eq.' + visitId);
-
-  // Откатить order_status: для каждого заказа визита проверяем есть ли другие записи
-  vorders.forEach(function(vo) {
-    if (!vo.order_no) return;
-    var orderOp = op;
-    // Проверяем есть ли ещё визиты с этим заказом
-    var otherIssue  = _sbGet(cfg, 'visit_orders?select=visit_id&order_no=eq.' + encodeURIComponent(vo.order_no) + '&limit=1');
-    if (otherIssue.length > 0) return; // есть другие записи — не откатываем
-    // Больше нет записей — сбрасываем статус
-    if (orderOp === 'issue' || orderOp === 'both') {
-      _sbPatch(cfg, 'order_status?order_no=eq.' + encodeURIComponent(vo.order_no),
-        { issued: false, issued_by: null });
-    }
-    if (orderOp === 'return' || orderOp === 'both') {
-      _sbPatch(cfg, 'order_status?order_no=eq.' + encodeURIComponent(vo.order_no),
-        { returned: false, returned_by: null });
-    }
+function _linkVisit(cfg, payload) {
+  if (!payload.visitId || !payload.orderIds || !payload.orderIds.length) {
+    throw new Error('visitId and orderIds are required');
+  }
+  var visits = _sbGet(cfg, 'visits?select=id,operation,is_other&id=eq.' + encodeURIComponent(payload.visitId) + '&limit=1');
+  if (!visits.length) throw new Error('Визит не найден');
+  var visit = visits[0];
+  var ids = payload.orderIds.map(function(id) { return '"' + id.replace(/"/g, '\\"') + '"'; });
+  var orders = _sbGet(cfg, 'orders?select=order_no,client,return_date,delivery_worker&order_no=in.(' + encodeURIComponent(ids.join(',')) + ')&limit=1000');
+  var byId = {};
+  orders.forEach(function(o) { byId[o.order_no] = o; });
+  var rows = payload.orderIds.map(function(id) {
+    var o = byId[id];
+    if (!o) throw new Error('Заказ не найден: ' + id);
+    var op = payload.operations && payload.operations[id] || visit.operation;
+    if (op !== 'issue' && op !== 'return') throw new Error('Неясная операция для заказа ' + id);
+    return { visit_id: visit.id, order_no: id, operation: op,
+      client_snapshot: o.client || '', return_date_snapshot: o.return_date || null,
+      delivery_snapshot: o.delivery_worker ? 'Наша доставка' : 'Самовывоз' };
   });
-
-  return { ok: true };
+  _sbPost(cfg, 'visit_orders', rows, 'return=minimal');
+  _sbPatch(cfg, 'visits?id=eq.' + encodeURIComponent(visit.id), { is_other: false });
+  return { ok: true, linked: rows.length };
 }
 
 // ─── saveDraft / clearDraft ───────────────────────────────────
 
 function _saveDraft(cfg, payload) {
   if (!payload.worker) return { ok: false, error: 'no worker' };
-  _sbUpsert(cfg, 'drafts', { worker: payload.worker, data: payload, saved_at: new Date().toISOString() }, 'worker');
+  var current = _sbGet(cfg, 'drafts?select=saved_at&worker=eq.' + encodeURIComponent(payload.worker) + '&limit=1');
+  var incoming = payload.savedAt || new Date().toISOString();
+  if (current.length && current[0].saved_at && current[0].saved_at > incoming) {
+    return { ok: true, ignored: true, reason: 'newer draft exists' };
+  }
+  _sbUpsert(cfg, 'drafts', { worker: payload.worker, data: payload, saved_at: incoming }, 'worker');
   return { ok: true };
 }
 
@@ -420,10 +352,8 @@ function _clearDraft(cfg, worker) {
 // ─── closeShift ──────────────────────────────────────────────
 
 function _closeShift(cfg, payload) {
-  _sbPatch(cfg, 'shifts?worker=eq.' + encodeURIComponent(payload.worker) +
-    '&start_at=eq.' + encodeURIComponent(payload.shiftStart), { end_at: payload.shiftEnd });
-  _sbDelete(cfg, 'drafts?worker=eq.' + encodeURIComponent(payload.worker));
-  return { ok: true };
+  payload.shiftDate = _isoDate(payload.shiftDate);
+  return _sbRpc(cfg, 'close_warehouse_shift', { p_payload: payload });
 }
 
 // ─── syncOrders: Sheets → Supabase ───────────────────────────
@@ -437,8 +367,35 @@ function syncOrders() {
   if (!sheet || sheet.getLastRow() < 2) return { ok: true, synced: 0 };
 
   var tz   = 'Europe/Moscow';
-  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 20).getValues();
-  var rows = data.filter(function(r) { return r[0]; }).map(function(r) {
+  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
+  var grouped = {};
+  data.filter(function(r) { return r[0]; }).forEach(function(r, idx) {
+    var orderNo = r[0].toString().trim().toUpperCase().replace(/[–—]/g, '-');
+    var issueDate = r[2] ? Utilities.formatDate(parseDate(r[2]), tz, 'yyyy-MM-dd') : null;
+    var returnDate = r[4] ? Utilities.formatDate(parseDate(r[4]), tz, 'yyyy-MM-dd') : null;
+    var row = grouped[orderNo] || {
+      order_no: orderNo, source_row_count: 0, source_active: true, source_rows: []
+    };
+    row.source_row_count++;
+    row.source_rows.push(idx + 2);
+    row.client = r[16] ? r[16].toString().trim() : row.client || '';
+    row.company = r[18] ? r[18].toString().trim() : row.company || '';
+    row.issue_date = !row.issue_date || (issueDate && issueDate < row.issue_date) ? issueDate : row.issue_date;
+    row.issue_time = r[3] ? r[3].toString().trim() : row.issue_time || '';
+    row.return_date = !row.return_date || (returnDate && returnDate > row.return_date) ? returnDate : row.return_date;
+    row.return_time = r[5] ? r[5].toString().trim() : row.return_time || '';
+    row.delivery_worker = r[19] ? r[19].toString().trim() : row.delivery_worker || '';
+    row.site_status = r[6] ? r[6].toString().trim() : row.site_status || '';
+    row.raw = { canonical: r, sourceRows: row.source_rows };
+    row.synced_at = new Date().toISOString();
+    grouped[orderNo] = row;
+  });
+  var rows = Object.keys(grouped).map(function(orderNo) {
+    var r = grouped[orderNo];
+    delete r.source_rows;
+    return r;
+  });
+  /* Legacy mapping kept intentionally out of lifecycle logic:
     return {
       order_no:        r[0].toString().trim(),
       client:          r[16] ? r[16].toString().trim() : '',
@@ -451,7 +408,7 @@ function syncOrders() {
       site_status:     r[6] ? r[6].toString().trim() : '',
       synced_at:       new Date().toISOString()
     };
-  });
+  }); */
   if (!rows.length) return { ok: true, synced: 0 };
 
   var synced = 0, lastCode = 0, lastBody = '';
@@ -468,7 +425,10 @@ function syncOrders() {
     if (lastCode >= 200 && lastCode < 300) synced += batch.length; else break;
   }
   if (lastCode < 200 || lastCode >= 300) return { ok: false, synced: synced, code: lastCode, error: lastBody };
-  return { ok: true, synced: synced };
+  var ids = rows.map(function(r) { return '"' + r.order_no.replace(/"/g, '\\"') + '"'; });
+  if (ids.length) _sbPatch(cfg, 'orders?order_no=not.in.(' + encodeURIComponent(ids.join(',')) + ')', { source_active: false });
+  return { ok: true, synced: synced, sourceRows: data.filter(function(r) { return r[0]; }).length,
+           duplicateRowsMerged: data.filter(function(r) { return r[0]; }).length - rows.length };
 }
 
 function setupSyncTrigger() {
@@ -489,10 +449,11 @@ function doGet(e) {
     if      (action === 'getData')    result = _getData(cfg, e.parameter.worker || null);
     else if (action === 'getAll')     result = _getAll(cfg, e.parameter.fromDate || null);
     else if (action === 'syncOrders') result = syncOrders();
-    else                              result = { error: 'Unknown action: ' + action };
+    else                              throw new Error('Unknown action: ' + action);
   } catch(err) {
-    result = { error: err.toString() };
+    result = { ok: false, error: err.toString() };
   }
+  if (result && result.ok === undefined) result = { ok: true, data: result };
   return ContentService.createTextOutput(JSON.stringify(result))
     .setMimeType(ContentService.MimeType.JSON);
 }
@@ -503,7 +464,7 @@ function doPost(e) {
   try {
     payload = JSON.parse(e.postData.contents);
   } catch(err) {
-    return ContentService.createTextOutput(JSON.stringify({ error: 'Invalid JSON: ' + err }))
+    return ContentService.createTextOutput(JSON.stringify({ ok: false, error: 'Invalid JSON: ' + err }))
       .setMimeType(ContentService.MimeType.JSON);
   }
   var action = payload.action || '';
@@ -514,10 +475,12 @@ function doPost(e) {
     else if (action === 'clearDraft') result = _clearDraft(cfg, payload.worker);
     else if (action === 'closeShift') result = _closeShift(cfg, payload);
     else if (action === 'deleteVisit')result = _deleteVisit(cfg, payload);
-    else                              result = { error: 'Unknown action: ' + action };
+    else if (action === 'linkVisit')  result = _linkVisit(cfg, payload);
+    else                              throw new Error('Unknown action: ' + action);
   } catch(err) {
-    result = { error: err.toString() };
+    result = { ok: false, error: err.toString() };
   }
+  if (result && result.ok === undefined) result = { ok: true, data: result };
   return ContentService.createTextOutput(JSON.stringify(result))
     .setMimeType(ContentService.MimeType.JSON);
 }

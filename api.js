@@ -7,6 +7,16 @@
 // ═══════════════════════════════════════════════════════════════
 (function (global) {
 
+  function apiError(payload, fallback) {
+    var msg = payload && (payload.error && (payload.error.message || payload.error) || payload.message);
+    return new Error(msg || fallback || 'Ошибка сервера');
+  }
+
+  function unwrap(payload) {
+    if (!payload || payload.ok === false || payload.error) throw apiError(payload);
+    return Object.prototype.hasOwnProperty.call(payload, 'data') ? payload.data : payload;
+  }
+
   // ── GET через Apps Script (нет CORS preflight) ──
   function asGet(action, params) {
     var url = SYNC_URL + '?action=' + encodeURIComponent(action);
@@ -18,7 +28,7 @@
     return fetch(url, { credentials: 'omit' }).then(function(r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
-    });
+    }).then(unwrap);
   }
 
   // ── POST через Apps Script (Content-Type:text/plain — нет preflight) ──
@@ -31,7 +41,7 @@
     }).then(function(r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
-    });
+    }).then(unwrap);
   }
 
   // ── sfetch: прямой GET к Supabase (для дашборда, второстепенных запросов) ──
@@ -97,6 +107,8 @@
   // ── addVisit: через Apps Script (обновляет order_status) ─────
   function addVisit(payload) {
     return asPost({ action: 'addVisit',
+      clientEventId: payload.clientEventId,
+      clientShiftId: payload.clientShiftId,
       worker: payload.worker, shiftStart: payload.shiftStart,
       shiftDate: payload.shiftDate, isNight: payload.isNight,
       entry: payload.entry });
@@ -105,8 +117,7 @@
   // ── deleteVisit ───────────────────────────────────────────────
   function deleteVisit(payload) {
     return asPost({ action: 'deleteVisit',
-      worker: payload.worker, shiftStart: payload.shiftStart,
-      timeAuto: payload.timeAuto });
+      visitId: payload.visitId });
   }
 
   // ── saveDraft ─────────────────────────────────────────────────
@@ -127,22 +138,23 @@
   function closeShift(payload) {
     return asPost({ action: 'closeShift',
       worker: payload.worker, shiftStart: payload.shiftStart,
-      shiftEnd: payload.shiftEnd });
+      shiftEnd: payload.shiftEnd, shiftDate: payload.shiftDate,
+      isNight: payload.isNight, clientShiftId: payload.clientShiftId });
   }
 
   // ── Синхронизация Sheets → Supabase ──────────────────────────
   function syncOrders() {
     if (typeof SYNC_URL === 'undefined' || !SYNC_URL) throw new Error('SYNC_URL не задан');
     return fetch(SYNC_URL + '?action=syncOrders', { credentials: 'omit' })
-      .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+      .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(unwrap);
   }
 
   // ── Сверка (дашборд) — прямой Supabase sfetch ────────────────
   function getUnmatched() {
     var today = mskToday();
-    var sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
     return Promise.all([
-      sfetch('visits', 'select=*&is_other=eq.true&visit_date=gte.' + sevenDaysAgo + '&limit=10000'),
+      sfetch('visits', 'select=*&is_other=eq.true&order=visit_date.desc&limit=10000'),
       sfetch('visit_orders', 'select=*&limit=10000'),
       sfetch('shifts', 'select=*&limit=10000'),
       sfetch('orders', 'select=*&limit=10000'),
@@ -172,12 +184,17 @@
       });
       var unlistedOrders = orders.filter(function(o) {
         var iss = o.issue_date || '', ret = o.return_date || '';
-        var inRange = (iss >= sevenDaysAgo && iss <= today) || (ret >= sevenDaysAgo && ret <= today);
-        return inRange && (!issuedSet.has(o.order_no) || (issuedSet.has(o.order_no) && !returnedSet.has(o.order_no)));
+        return (o.source_active !== false) &&
+          ((!issuedSet.has(o.order_no) && iss && iss <= today) ||
+           (issuedSet.has(o.order_no) && !returnedSet.has(o.order_no) && ret && ret <= today) ||
+           (returnedSet.has(o.order_no) && !issuedSet.has(o.order_no)));
       }).map(function(o) {
+        var category = returnedSet.has(o.order_no) && !issuedSet.has(o.order_no) ? 'inconsistent' :
+          (!issuedSet.has(o.order_no) ? 'missing_issue' : 'missing_return');
         return { id: o.order_no, client: o.client || '',
           issueDate: ddmmyyyy(o.issue_date), returnDate: ddmmyyyy(o.return_date),
-          orderType: issuedSet.has(o.order_no) ? 'return' : 'issue' };
+          category: category,
+          orderType: category === 'missing_return' ? 'return' : 'issue' };
       });
       return { unmatchedVisits: unmatchedVisits, unlistedOrders: unlistedOrders };
     });
@@ -185,29 +202,17 @@
 
   // ── linkVisit (дашборд) ───────────────────────────────────────
   function linkVisit(payload) {
-    var sb = client();
     var visitKey = payload.visitKey, orderIds = payload.orderIds;
     if (!visitKey || !orderIds || !orderIds.length) return Promise.resolve({ success: false });
-    return sfetch('orders', 'select=order_no,client,return_date,delivery_worker&order_no=in.(' + orderIds.join(',') + ')')
-      .then(function(ordRows) {
-        var ordMap = {};
-        ordRows.forEach(function(o) { ordMap[o.order_no] = o; });
-        var toInsert = orderIds.map(function(id) { return {
-          visit_id: visitKey, order_no: id,
-          client_snapshot: ordMap[id] ? ordMap[id].client || '' : '',
-          return_date_snapshot: ordMap[id] ? ordMap[id].return_date || null : null,
-          delivery_snapshot: ordMap[id] && ordMap[id].delivery_worker ? 'Наша доставка' : 'Самовывоз'
-        }; });
-        return sb.from('visit_orders').insert(toInsert);
-      }).then(function(ins) {
-        if (ins && ins.error) return { success: false, error: ins.error.message };
-        return client().from('visits').update({ is_other: false }).eq('id', visitKey);
-      }).then(function() { return { success: true, linked: orderIds.length }; });
+    return asPost({ action: 'linkVisit', visitId: visitKey, orderIds: orderIds,
+      operations: payload.operations || {} }).then(function(r) {
+        return { success: true, linked: r.linked || orderIds.length };
+      });
   }
 
   // ── deleteOrder (дашборд) ─────────────────────────────────────
   function deleteOrder(orderId) {
-    return client().from('orders').delete().eq('order_no', orderId)
+    return client().from('orders').update({ source_active: false }).eq('order_no', orderId)
       .then(function(res) { if (res.error) throw res.error; return { success: true }; });
   }
 
