@@ -568,7 +568,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   document.getElementById('todayDateLbl').textContent =
     new Date().toLocaleDateString('ru',{weekday:'long',day:'numeric',month:'long',timeZone:'Europe/Moscow'});
   loadData();
-  loadWorkersDB();
+  loadWorkersDB().then(renderWorkers);
   setInterval(loadData, 120000); // автообновление раз в 2 минуты
 });
 
@@ -672,6 +672,13 @@ function getOrderStatuses(){
   const issued   = new Set(serverProcessed.issued);
   const returned = new Set(serverProcessed.returned);
   return {issued,returned};
+}
+
+function orderOperation(v,o){
+  const op=o?.operation||v.operation;
+  if(op==='pickup') return 'issue';
+  if(op==='dropoff') return 'return';
+  return op;
 }
 
 function renderOrders(){
@@ -838,7 +845,7 @@ function renderOrders(){
 // ══════════════════════════════════════════
 // SCHEDULE / HEATMAP
 // ══════════════════════════════════════════
-function setPeriodH(d,el){ hPeriod=d; document.querySelectorAll('#tab-schedule .pbtn').forEach(b=>b.classList.remove('active')); el.classList.add('active'); renderSchedule(); }
+function setPeriodH(d,el){ hPeriod=d; document.querySelectorAll('#tab-schedule .pbtn').forEach(b=>b.classList.remove('active')); el.classList.add('active'); loadData(); }
 
 function getHeatVisits(){
   const cutoffISO=fmtMsk(new Date(mskNow().getTime()-hPeriod*864e5));
@@ -875,10 +882,10 @@ function renderInsights(data){
 }
 
 function renderHeatmap(data){
-  const HOURS=Array.from({length:16},(_,i)=>i+8);
+  const HOURS=Array.from({length:24},(_,i)=>i);
   const grid=Array(7).fill(null).map(()=>Array(24).fill(0));
   const dc=Array(7).fill(0);
-  data.forEach(v=>{ const wd=v.wd; if(v.hour>=8&&v.hour<=23){ grid[wd][v.hour]++; } dc[wd]++; });
+  data.forEach(v=>{ const wd=v.wd; if(v.hour>=0&&v.hour<=23){ grid[wd][v.hour]++; } dc[wd]++; });
   const norm=grid.map((row,wd)=>row.map(c=>dc[wd]?c/dc[wd]*100:0));
   const mx=Math.max(...norm.flat());
   const color=v=>{ if(!v)return{bg:'#f5f5f3',c:'#ddd'}; const r=v/mx; if(r>=.85)return{bg:'#E74C3C',c:'#fff'}; if(r>=.6)return{bg:'#FF6B35',c:'#fff'}; if(r>=.35)return{bg:'#F5C518',c:'#333'}; if(r>=.15)return{bg:'rgba(245,197,24,.35)',c:'#555'}; return{bg:'rgba(245,197,24,.1)',c:'#aaa'}; };
@@ -895,9 +902,9 @@ function renderHeatmap(data){
 }
 
 function renderHourlyCharts(data){
-  const H=Array.from({length:16},(_,i)=>i+8);
+  const H=Array.from({length:24},(_,i)=>i);
   const tot=Array(24).fill(0),bT={client:Array(24).fill(0),yandex:Array(24).fill(0),our:Array(24).fill(0)};
-  data.forEach(v=>{ if(v.hour>=8&&v.hour<=23){ tot[v.hour]++; if(bT[v.visitor]) bT[v.visitor][v.hour]++; } });
+  data.forEach(v=>{ if(v.hour>=0&&v.hour<=23){ const count=v.ordersArr?.filter(o=>o.id&&o.id!=='__other__').length||1; tot[v.hour]+=count; if(bT[v.visitor]) bT[v.visitor][v.hour]+=count; } });
   const lbls=H.map(h=>`${String(h).padStart(2,'0')}:00`);
   dc('chHourly');
   charts['chHourly']=new Chart(document.getElementById('chHourly'),{type:'bar',data:{labels:lbls,datasets:[{data:H.map(h=>tot[h]),backgroundColor:H.map(h=>tot[h]===Math.max(...H.map(hh=>tot[hh]))?'rgba(231,76,60,.85)':'rgba(245,197,24,.75)'),borderRadius:3}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{font:{family:'Montserrat',size:9},maxRotation:45}},y:{grid:{color:'#f0f0f0'},ticks:{font:{family:'Montserrat',size:10}},beginAtZero:true}}}});
@@ -913,7 +920,7 @@ function setPeriod(d,el){
   document.querySelectorAll('#tab-stats .pbtn').forEach(b=>b.classList.remove('active')); el.classList.add('active');
   const to=new Date(), fr=new Date(); fr.setDate(fr.getDate()-d+1);
   document.getElementById('dateFrom').value=fmt(fr); document.getElementById('dateTo').value=fmt(to);
-  renderStats();
+  loadData();
 }
 
 function getStatVisits(){
@@ -930,8 +937,8 @@ function renderStats(){
   document.getElementById('sv-workers').textContent=new Set(data.map(v=>v.worker)).size;
   // orders
   const allOrds=data.flatMap(v=>v.ordersArr.filter(o=>o.id&&o.id!=='__other__'));
-  const issuedO=data.filter(v=>['issue','pickup','both'].includes(v.operation)).flatMap(v=>v.ordersArr.filter(o=>o.id&&o.id!=='__other__'));
-  const returnO=data.filter(v=>['return','dropoff','both'].includes(v.operation)).flatMap(v=>v.ordersArr.filter(o=>o.id&&o.id!=='__other__'));
+  const issuedO=data.flatMap(v=>v.ordersArr.filter(o=>o.id&&o.id!=='__other__'&&['issue','both'].includes(orderOperation(v,o))));
+  const returnO=data.flatMap(v=>v.ordersArr.filter(o=>o.id&&o.id!=='__other__'&&['return','both'].includes(orderOperation(v,o))));
   document.getElementById('so-total').textContent=allOrds.length;
   document.getElementById('so-issued').textContent=issuedO.length;
   document.getElementById('so-returned').textContent=returnO.length;
@@ -945,7 +952,6 @@ function dateLabels(){
   const fr=new Date(document.getElementById('dateFrom').value), to=new Date(document.getElementById('dateTo').value);
   const lbls=[]; const c=new Date(fr);
   while(c<=to){ lbls.push(fmt(c)); c.setDate(c.getDate()+1); }
-  if(lbls.length>60) return lbls.filter((_,i)=>i%7===0);
   return lbls;
 }
 
@@ -1005,7 +1011,7 @@ function renderDNType(data){
 // ══════════════════════════════════════════
 // WORKERS
 // ══════════════════════════════════════════
-function setPeriodW(d,el){ wPeriod=d; document.querySelectorAll('#tab-workers .pbtn').forEach(b=>b.classList.remove('active')); el.classList.add('active'); renderWorkers(); }
+function setPeriodW(d,el){ wPeriod=d; document.querySelectorAll('#tab-workers .pbtn').forEach(b=>b.classList.remove('active')); el.classList.add('active'); loadData(); }
 
 let allWorkersDB=[], showArchived=false, wdPeriod=30, currentWorkerDetail='';
 
@@ -1034,12 +1040,13 @@ async function addWorkerUI(){
 }
 
 async function archiveWorkerUI(name){
-  showConfirm('Архивировать кладовщика','Убрать <b>'+esc(name)+'</b> в архив? Вся история сохранится.','Архивировать',async()=>{
+  const ok=await showConfirm('Архивировать кладовщика','Убрать <b>'+esc(name)+'</b> в архив? Вся история сохранится.','Архивировать');
+  if(ok){
     await WHApi.setWorkerActive(name,false);
     await loadWorkersDB();
     renderWorkers();
     showToast('Перемещён в архив');
-  });
+  }
 }
 
 async function restoreWorkerUI(name){
@@ -1064,12 +1071,8 @@ function renderWorkers(){
     w.visits++;
     const ords=v.ordersArr.filter(o=>o.id&&o.id!=='__other__');
     w.orders+=ords.length;
-    if(v.operation==='both'){
-      ords.forEach(o=>{ if(['issue','pickup'].includes(o.type))  w.issued++; else if(['return','dropoff'].includes(o.type)) w.returned++; else w.issued++; });
-    } else {
-      if(['issue','pickup'].includes(v.operation)) w.issued+=ords.length;
-      if(['return','dropoff'].includes(v.operation)) w.returned+=ords.length;
-    }
+    w.issued+=ords.filter(o=>['issue','both'].includes(orderOperation(v,o))).length;
+    w.returned+=ords.filter(o=>['return','both'].includes(orderOperation(v,o))).length;
     if(!v.isNight)w.day++; else w.night++;
   });
 
@@ -1129,7 +1132,7 @@ function setWdPeriod(d,el){
   wdPeriod=d;
   document.querySelectorAll('#tab-worker-detail .pbtn').forEach(b=>b.classList.remove('active'));
   el.classList.add('active');
-  renderWorkerDetail(currentWorkerDetail);
+  loadData().then(()=>renderWorkerDetail(currentWorkerDetail));
 }
 
 function openWorkerDetail(name){
@@ -1191,7 +1194,7 @@ function renderWorkerDetail(name){
 // ══════════════════════════════════════════
 // TIMESHEET (табель часов)
 // ══════════════════════════════════════════
-function setPeriodTS(d,el){ tsPeriod=d; document.querySelectorAll('#tab-timesheet .pbtn').forEach(b=>b.classList.remove('active')); el.classList.add('active'); renderTimesheet(); }
+function setPeriodTS(d,el){ tsPeriod=d; document.querySelectorAll('#tab-timesheet .pbtn').forEach(b=>b.classList.remove('active')); el.classList.add('active'); loadData(); }
 
 function calcShiftHours(s){
   if(!s.shiftStart||!s.shiftEnd) return {total:0,night:0};
@@ -1203,7 +1206,8 @@ function calcShiftHours(s){
   let nightMs=0;
   const cur=new Date(start);
   while(cur<end){
-    const next=new Date(Math.min(cur.getTime()+3600000,end.getTime()));
+    const hourBoundary=new Date(cur); hourBoundary.setUTCMinutes(0,0,0); hourBoundary.setUTCHours(hourBoundary.getUTCHours()+1);
+    const next=new Date(Math.min(hourBoundary.getTime(),end.getTime()));
     const hMsk=(cur.getUTCHours()+MSK_OFFSET)%24;
     if(hMsk>=22||hMsk<9) nightMs+=next-cur;
     cur.setTime(next.getTime());
@@ -1337,7 +1341,7 @@ function exportTimesheet(){
 // ══════════════════════════════════════════
 // LOG
 // ══════════════════════════════════════════
-function setPeriodL(d,el){ logPeriod=d; document.querySelectorAll('#tab-log .pbtn').forEach(b=>b.classList.remove('active')); el.classList.add('active'); renderLog(); }
+function setPeriodL(d,el){ logPeriod=d; document.querySelectorAll('#tab-log .pbtn').forEach(b=>b.classList.remove('active')); el.classList.add('active'); loadData(); }
 
 function renderLog(){
   const cutoffISO=fmtMsk(new Date(mskNow().getTime()-logPeriod*864e5));
@@ -1356,7 +1360,7 @@ function renderLog(){
     const ords=v.ordersArr.filter(o=>o.id&&o.id!=='__other__'&&o.id!=='(нет в списке)');
     const hasOther=v.ordersArr.some(o=>o.id==='__other__'||o.id==='(нет в списке)');
     const ordHtml=ords.length
-      ? ords.map(o=>`<span class="onum" style="font-size:10px">${o.id}</span>${o.client?` <span style="font-size:9px;color:var(--muted)">${o.client}</span>`:''}`).join('<br>')
+      ? ords.map(o=>`<span class="onum" style="font-size:10px">${esc(o.id)}</span>${o.client?` <span style="font-size:9px;color:var(--muted)">${esc(o.client)}</span>`:''}`).join('<br>')
         + (hasOther?`<br><span style="font-size:10px;color:#b84a1a">⚠️ Заказ не из списка</span>`:'')
       : hasOther
         ? `<span style="font-size:10px;color:#b84a1a">⚠️ Заказ не из списка</span>`
@@ -1365,12 +1369,12 @@ function renderLog(){
       <td>${dStr}</td>
       <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted)">${timeDisplay}</td>
       <td><span class="badge ${v.isNight?'night':'day'}">${v.isNight?'Ночь':'День'}</span></td>
-      <td><strong>${v.worker||'—'}</strong></td>
+      <td><strong>${esc(v.worker||'—')}</strong></td>
       <td>${v.visitor?`<span class="badge ${v.visitor}">${VIS[v.visitor]||v.visitor}</span>`:'—'}</td>
       <td style="font-size:11px;font-weight:600;color:var(--mid)">${OPL[v.operation]||v.operation||'—'}</td>
       <td>${ordHtml}</td>
       <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted)">${ords.length||(hasOther?'⚠️':'—')}</td>
-      <td style="font-size:11px;color:var(--muted)">${v.comment||'—'}</td>
+      <td style="font-size:11px;color:var(--muted)">${esc(v.comment||'—')}</td>
     </tr>`;
   }).join('');
 }
@@ -1436,7 +1440,7 @@ function renderLinkTab(){
   const el=document.getElementById('linkContent');
 
   if(!visits.length && !orders.length){
-    el.innerHTML=`<div class="no-unmatched"><div class="no-unmatched-ico">✅</div><div style="font-size:15px;font-weight:700;color:var(--black);margin-bottom:6px">Всё в порядке!</div><div style="font-size:12px">Нет визитов «нет в списке» за последние 7 дней</div></div>`;
+    el.innerHTML=`<div class="no-unmatched"><div class="no-unmatched-ico">✅</div><div style="font-size:15px;font-weight:700;color:var(--black);margin-bottom:6px">Всё в порядке!</div><div style="font-size:12px">Нет несвязанных визитов и нарушений жизненного цикла</div></div>`;
     return;
   }
 
@@ -1455,22 +1459,24 @@ function renderLinkTab(){
         <div class="visit-card-top">
           <div>
             <div class="visit-card-title">${shiftDateFmt2} · ${timeFmt2||'—'} МСК</div>
-            <div class="visit-card-meta">${v.worker} · ${v.isNight==='Ночь'?'🌙':'☀️'} · ${visLabel} · ${opLabel}</div>
+            <div class="visit-card-meta">${esc(v.worker)} · ${v.isNight==='Ночь'?'🌙':'☀️'} · ${esc(visLabel)} · ${esc(opLabel)}</div>
           </div>
           <button class="link-btn" onclick="openLinkModal(${i})">Связать →</button>
         </div>
         ${v.comment?`<div class="visit-card-comment">💬 ${esc(v.comment)}</div>`:''}
-        ${v.orders.length?`<div style="margin-top:6px;font-size:11px;color:var(--muted)">Уже привязаны: ${v.orders.map(o=>o.id).join(', ')}</div>`:''}
+        ${v.orders.length?`<div style="margin-top:6px;font-size:11px;color:var(--muted)">Уже привязаны: ${v.orders.map(o=>esc(o.id)).join(', ')}</div>`:''}
       </div>`;
     });
   }
 
   // Unlisted orders (have no log entry)
   if(orders.length){
-    html+=`<div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--light);margin:20px 0 10px">📋 Заказы без записи в логе (${orders.length})</div>`;
-    html+=`<div class="twrap scroll"><table class="dt"><thead><tr><th>Заказ</th><th>Клиент</th><th>Дата выдачи</th><th>Возврат</th></tr></thead><tbody>`;
+    html+=`<div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--light);margin:20px 0 10px">📋 Нарушения жизненного цикла (${orders.length})</div>`;
+    html+=`<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Нет выдачи — дата выдачи наступила, но выдача не записана. Нет возврата — заказ выдан, срок возврата наступил. Несогласованность — возврат есть без выдачи.</div>`;
+    html+=`<div class="twrap scroll"><table class="dt"><thead><tr><th>Заказ</th><th>Клиент</th><th>Проблема</th><th>Дата выдачи</th><th>Возврат</th></tr></thead><tbody>`;
     orders.forEach(o=>{
-      html+=`<tr><td><span class="onum">${o.id}</span></td><td><strong>${o.client}</strong></td><td>${o.issueDate||'—'}</td><td>${o.returnDate||'—'}</td></tr>`;
+      const problem={missing_issue:'Нет выдачи',missing_return:'Нет возврата',inconsistent:'Возврат без выдачи'}[o.category]||o.category||'Требует проверки';
+      html+=`<tr><td><span class="onum">${esc(o.id)}</span></td><td><strong>${esc(o.client)}</strong></td><td>${esc(problem)}</td><td>${esc(o.issueDate||'—')}</td><td>${esc(o.returnDate||'—')}</td></tr>`;
     });
     html+=`</tbody></table></div>`;
   }
@@ -1487,7 +1493,7 @@ function openLinkModal(visitIdx){
   document.getElementById('linkModalVisitInfo').textContent=
     `${v.shiftDate} · ${v.time} МСК · ${v.worker} · ${v.operation}${v.comment?' · «'+v.comment+'»':''}`;
 
-  const issueOrders  = orders.filter(o => o.orderType !== 'return');
+  const issueOrders  = orders.filter(o => o.orderType !== 'return' && o.category!=='inconsistent');
   const returnOrders = orders.filter(o => o.orderType === 'return');
   const orderRowHtml = o => {
     const badge = o.orderType === 'return'
@@ -1535,7 +1541,9 @@ async function confirmLink(){
   const btn=document.getElementById('linkConfirmBtn');
   btn.textContent='Отправка...'; btn.disabled=true;
   try{
-    const j=await WHApi.linkVisit({visitKey:currentLinkVisit.visitKey,orderIds:[...selectedOrderIds]});
+    const ops={};
+    [...selectedOrderIds].forEach(id=>{ const o=(unmatchedData.unlistedOrders||[]).find(x=>x.id===id); ops[id]=o?.orderType||currentLinkVisit.operation; });
+    const j=await WHApi.linkVisit({visitKey:currentLinkVisit.visitKey,orderIds:[...selectedOrderIds],operations:ops});
     if(j.success){
       closeLinkModal();
       await loadUnmatched();
@@ -1546,7 +1554,7 @@ async function confirmLink(){
       btn.textContent='✓ Связать'; btn.disabled=false;
     }
   }catch(e){
-    alert('Ошибка соединения');
+    alert('Ошибка: '+(e.message||e));
     btn.textContent='✓ Связать'; btn.disabled=false;
   }
 }
