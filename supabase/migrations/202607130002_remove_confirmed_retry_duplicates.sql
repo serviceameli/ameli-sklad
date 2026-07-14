@@ -5,8 +5,12 @@
 -- are removed because a linked canonical return exists in the same shift.
 -- Ambiguous historical "both" visits are intentionally untouched.
 
-delete from public.visits
-where id = any(array[
+do $$
+declare
+  v_deleted integer;
+begin
+  with candidate_ids(id) as (
+    select unnest(array[
   '05dee71c-fd72-4dfd-988c-fad6d7557905'::uuid,
   '0f5ab985-83f3-40b0-9f23-14b1c53ac78a'::uuid,
   '0f79cf1a-cc79-414f-8756-b9dc3f9acab3'::uuid,
@@ -58,5 +62,80 @@ where id = any(array[
   'e7f93d64-70c2-4c68-b20f-46f8576df2f8'::uuid,
   'ec36b738-2db7-4a79-bf28-2f0791d201ca'::uuid,
   'ef8a2db1-6014-41a5-af41-48d8594673cc'::uuid,
-  'f1de48d2-da2c-41b0-bbf8-67713d3ca479'::uuid
-]);
+      'f1de48d2-da2c-41b0-bbf8-67713d3ca479'::uuid
+    ])
+  ),
+  safe_exact as (
+    select candidate.id
+    from candidate_ids candidate
+    join public.visits v on v.id = candidate.id
+    where v.client_event_id is null
+      and exists (
+        select 1
+        from public.visits keep
+        where keep.id <> v.id
+          and not exists (select 1 from candidate_ids c2 where c2.id = keep.id)
+          and keep.entered_at <= v.entered_at
+          and keep.shift_id is not distinct from v.shift_id
+          and keep.worker is not distinct from v.worker
+          and keep.visitor is not distinct from v.visitor
+          and keep.operation is not distinct from v.operation
+          and keep.visit_date is not distinct from v.visit_date
+          and keep.visit_time is not distinct from v.visit_time
+          and coalesce(keep.comment, '') = coalesce(v.comment, '')
+          and (
+            select coalesce(array_agg(
+              coalesce(vo.order_no, '') || '|' || coalesce(vo.operation, '') || '|' ||
+              coalesce(vo.client_snapshot, '') || '|' || coalesce(vo.return_date_snapshot::text, '') || '|' ||
+              coalesce(vo.delivery_snapshot, '') order by vo.order_no nulls first, vo.id
+            ), array[]::text[])
+            from public.visit_orders vo where vo.visit_id = keep.id
+          ) = (
+            select coalesce(array_agg(
+              coalesce(vo.order_no, '') || '|' || coalesce(vo.operation, '') || '|' ||
+              coalesce(vo.client_snapshot, '') || '|' || coalesce(vo.return_date_snapshot::text, '') || '|' ||
+              coalesce(vo.delivery_snapshot, '') order by vo.order_no nulls first, vo.id
+            ), array[]::text[])
+            from public.visit_orders vo where vo.visit_id = v.id
+          )
+      )
+  ),
+  safe_shadow as (
+    select candidate.id
+    from candidate_ids candidate
+    join public.visits v on v.id = candidate.id
+    where v.client_event_id is null
+      and v.is_other
+      and exists (
+        select 1
+        from public.visits keep
+        where not keep.is_other
+          and keep.shift_id is not distinct from v.shift_id
+          and keep.worker is not distinct from v.worker
+          and keep.visitor is not distinct from v.visitor
+          and keep.operation is not distinct from v.operation
+          and keep.visit_date is not distinct from v.visit_date
+          and keep.visit_time is not distinct from v.visit_time
+          and coalesce(keep.comment, '') = coalesce(v.comment, '')
+          and exists (
+            select 1 from public.visit_orders vo
+            where vo.visit_id = keep.id and vo.order_no is not null
+          )
+      )
+  ),
+  safe_ids as (
+    select id from safe_exact
+    union
+    select id from safe_shadow
+  )
+  delete from public.visits v
+  using safe_ids safe
+  where v.id = safe.id;
+
+  get diagnostics v_deleted = row_count;
+  raise notice 'Deleted % confirmed retry visits; changed candidates were left untouched', v_deleted;
+  if v_deleted not in (0, 52) then
+    raise exception 'Expected 52 unchanged candidates (or 0 on rerun), got %. Cleanup rolled back for review.', v_deleted;
+  end if;
+end
+$$;
