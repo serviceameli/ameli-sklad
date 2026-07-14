@@ -33,6 +33,32 @@ function _sbGet(cfg, path) {
   return text ? JSON.parse(text) : [];
 }
 
+function _sbGetAll(cfg, path) {
+  var table = path.split('?')[0];
+  var stableKey = {
+    visits: 'id', visit_orders: 'id', shifts: 'id', orders: 'order_no',
+    order_status: 'order_no', workers: 'name', drafts: 'worker'
+  }[table];
+  if (stableKey) {
+    var orderMatch = path.match(/([?&]order=)([^&]*)/);
+    if (orderMatch) {
+      if (orderMatch[2].split(',').every(function(part) { return part.split('.')[0] !== stableKey; })) {
+        path = path.replace(orderMatch[0], orderMatch[1] + orderMatch[2] + ',' + stableKey + '.asc');
+      }
+    } else {
+      path += (path.indexOf('?') >= 0 ? '&' : '?') + 'order=' + stableKey + '.asc';
+    }
+  }
+  var result = [], offset = 0, pageSize = 1000;
+  while (true) {
+    var page = _sbGet(cfg, path + (path.indexOf('?') >= 0 ? '&' : '?') +
+      'limit=' + pageSize + '&offset=' + offset);
+    result = result.concat(page);
+    if (page.length < pageSize) return result;
+    offset += pageSize;
+  }
+}
+
 function _sbPost(cfg, table, body, prefer) {
   var rows = Array.isArray(body) ? body : [body];
   var resp = UrlFetchApp.fetch(cfg.url + '/rest/v1/' + table, {
@@ -91,16 +117,38 @@ function _sbDelete(cfg, path) {
   if (code < 200 || code >= 300) throw new Error('DELETE ' + path + ' → ' + code + ': ' + resp.getContentText().slice(0, 200));
 }
 
+function _rpcRetryable(httpCode, responseBody) {
+  var pgCode = '';
+  try { pgCode = JSON.parse(responseBody || '{}').code || ''; } catch (e) {}
+  // Constraint/data errors never heal after a retry. Serialization, lock,
+  // resource and connection failures can be retried with the same event id.
+  if (/^23/.test(pgCode)) return false;
+  if (/^(40001|40P01|55P03|57014|08|53|57P0[123])/.test(pgCode)) return true;
+  return httpCode === 408 || httpCode === 425 || httpCode === 429 || httpCode >= 500;
+}
+
 function _sbRpc(cfg, name, body) {
-  var resp = UrlFetchApp.fetch(cfg.url + '/rest/v1/rpc/' + name, {
-    method: 'post',
-    contentType: 'application/json',
-    headers: { apikey: cfg.key, Authorization: 'Bearer ' + cfg.key },
-    payload: JSON.stringify(body),
-    muteHttpExceptions: true
-  });
+  var resp;
+  try {
+    resp = UrlFetchApp.fetch(cfg.url + '/rest/v1/rpc/' + name, {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { apikey: cfg.key, Authorization: 'Bearer ' + cfg.key },
+      payload: JSON.stringify(body),
+      muteHttpExceptions: true
+    });
+  } catch (fetchError) {
+    var transportError = new Error('RPC ' + name + ': ошибка соединения: ' + fetchError);
+    transportError.retryable = true;
+    throw transportError;
+  }
   var code = resp.getResponseCode();
-  if (code < 200 || code >= 300) throw new Error('RPC ' + name + ' → ' + code + ': ' + resp.getContentText().slice(0, 300));
+  if (code < 200 || code >= 300) {
+    var responseBody = resp.getContentText();
+    var err = new Error('RPC ' + name + ' → ' + code + ': ' + responseBody.slice(0, 300));
+    err.retryable = _rpcRetryable(code, responseBody);
+    throw err;
+  }
   var text = resp.getContentText();
   return text ? JSON.parse(text) : { ok: true };
 }
@@ -115,19 +163,32 @@ function _dateNDaysAgo(n) {
   return Utilities.formatDate(new Date(Date.now() - n * 86400000), 'Europe/Moscow', 'yyyy-MM-dd');
 }
 
+function _dateBefore(iso, days) {
+  var p = iso.split('-');
+  var d = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2]));
+  d.setUTCDate(d.getUTCDate() - days);
+  return Utilities.formatDate(d, 'UTC', 'yyyy-MM-dd');
+}
+
 function _ddmmyyyy(iso) {
   if (!iso) return '';
   var p = iso.split('-');
   return p.length === 3 ? p[2] + '.' + p[1] + '.' + p[0] : iso;
 }
 
-function _isoDate(val) {
+function _validYmd(y, m, d) {
+  var date = new Date(Date.UTC(+y, +m - 1, +d));
+  return date.getUTCFullYear() === +y && date.getUTCMonth() === +m - 1 && date.getUTCDate() === +d;
+}
+
+function _isoDate(val, label) {
   if (!val) return mskToday();
   var s = val.toString().trim();
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  var iso = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:$|T)/);
+  if (iso && _validYmd(iso[1], iso[2], iso[3])) return iso[1] + '-' + iso[2] + '-' + iso[3];
   var m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
-  if (m) return m[3] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2);
-  return mskToday();
+  if (m && _validYmd(m[3], m[2], m[1])) return m[3] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2);
+  throw new Error('Неверная дата' + (label ? ' «' + label + '»' : '') + ': ' + val);
 }
 
 function _fmtTime(v) {
@@ -141,8 +202,8 @@ function _fmtTime(v) {
 }
 
 function parseDate(val) {
-  if (!val) return new Date();
-  if (val instanceof Date) return val;
+  if (!val) return null;
+  if (val instanceof Date && !isNaN(val.getTime())) return val;
   var s = val.toString().trim();
   var m1 = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
   if (m1) return new Date(+m1[3], +m1[2] - 1, +m1[1]);
@@ -150,7 +211,37 @@ function parseDate(val) {
   if (m2) return new Date(+m2[1], +m2[2] - 1, +m2[3]);
   var n = Number(s);
   if (!isNaN(n) && n > 40000) return new Date((n - 25569) * 86400000);
-  return new Date();
+  return null;
+}
+
+function _sheetDate(val, tz, rowNo, label) {
+  if (!val) return null;
+  var raw = val.toString().trim();
+  var dm = raw.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+  var im = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if ((dm && !_validYmd(dm[3], dm[2], dm[1])) || (im && !_validYmd(im[1], im[2], im[3]))) {
+    throw new Error('Неверная дата «' + label + '» в строке ' + rowNo + ': ' + val);
+  }
+  var d = parseDate(val);
+  if (!d || isNaN(d.getTime())) {
+    throw new Error('Неверная дата «' + label + '» в строке ' + rowNo + ': ' + val);
+  }
+  return Utilities.formatDate(d, tz, 'yyyy-MM-dd');
+}
+
+function _sheetTime(val, tz) {
+  if (!val) return '';
+  if (val instanceof Date && !isNaN(val.getTime())) return Utilities.formatDate(val, tz, 'HH:mm');
+  var s = val.toString().trim();
+  var m = s.match(/^(\d{1,2}):(\d{2})/);
+  if (m && +m[1] <= 23 && +m[2] <= 59) return ('0' + m[1]).slice(-2) + ':' + m[2];
+  throw new Error('Неверное время в таблице: ' + val);
+}
+
+function _normOperation(value) {
+  if (value === 'issue' || value === 'pickup') return 'issue';
+  if (value === 'return' || value === 'dropoff') return 'return';
+  return null;
 }
 
 // ─── Логика заказов ──────────────────────────────────────────
@@ -169,7 +260,11 @@ function _buildOrders(rows, today, issuedSet, returnedSet) {
   var result = [], seen = {};
   rows.forEach(function(o) {
     var id = o.order_no, iss = o.issue_date || '', ret = o.return_date || '';
-    if (!id || seen[id] || returnedSet[id] || o.source_active === false) return;
+    var openRental = !!issuedSet[id] && !returnedSet[id];
+    if (!id || seen[id] || returnedSet[id] || o.manual_hidden === true || o.lifecycle_ambiguous === true) return;
+    // Исчезновение строки из следующего экспорта не закрывает уже выданную
+    // аренду: она остаётся у клиента до явного возврата.
+    if (o.source_active === false && !openRental) return;
     seen[id] = true;
     var sameDay = !!iss && iss === ret;
     var type = null, overdue = false;
@@ -186,6 +281,63 @@ function _buildOrders(rows, today, issuedSet, returnedSet) {
   return result;
 }
 
+function _buildVisibleOrders(rows, today, issuedSet, returnedSet, issuedTodaySet, returnedTodaySet) {
+  var result = _buildOrders(rows, today, issuedSet, returnedSet);
+  var byId = {};
+  result.forEach(function(o) { byId[o.id] = o; });
+  rows.forEach(function(o) {
+    var id = o.order_no;
+    var issuedToday = !!issuedTodaySet[id];
+    var returnedToday = !!returnedTodaySet[id] && !!issuedSet[id];
+    var openRental = !!issuedSet[id] && !returnedSet[id];
+    if (!id || o.manual_hidden === true || o.lifecycle_ambiguous === true) return;
+    if (o.source_active === false && !openRental && !issuedToday && !returnedToday) return;
+    if (!issuedToday && !returnedToday) return;
+    var item = byId[id];
+    if (!item) {
+      item = _ext(_baseOf(o), {
+        type: returnedToday ? 'return' : 'issue',
+        sameDay: !!o.issue_date && o.issue_date === o.return_date,
+        overdue: false, overdueType: null,
+        lifecycle: returnedToday ? 'returned' : 'issued'
+      });
+      result.push(item); byId[id] = item;
+    }
+    item.processedTodayIssue = issuedToday;
+    item.processedTodayReturn = returnedToday;
+  });
+  return result;
+}
+
+function _processedOnDate(visits, links, date) {
+  var visitById = {}, issued = {}, returned = {};
+  visits.forEach(function(v) { if (v.visit_date === date) visitById[v.id] = v; });
+  links.forEach(function(vo) {
+    if (!vo.order_no || !visitById[vo.visit_id]) return;
+    var op = _normOperation(vo.operation) || _normOperation(visitById[vo.visit_id].operation);
+    if (op === 'issue') issued[vo.order_no] = true;
+    if (op === 'return') returned[vo.order_no] = true;
+  });
+  return { issued: issued, returned: returned };
+}
+
+function _processedEvents(events) {
+  var issued = {}, returned = {};
+  events.forEach(function(e) {
+    if (e.operation === 'issue') issued[e.order_no] = true;
+    if (e.operation === 'return') returned[e.order_no] = true;
+  });
+  return { issued: issued, returned: returned };
+}
+
+function _returnsWithIssue(returned, issued) {
+  var valid = {};
+  Object.keys(returned || {}).forEach(function(id) {
+    if (issued && issued[id]) valid[id] = true;
+  });
+  return valid;
+}
+
 function _ext(obj, extra) {
   var r = {}; for (var k in obj) r[k] = obj[k]; for (var k in extra) r[k] = extra[k]; return r;
 }
@@ -194,13 +346,17 @@ function _ext(obj, extra) {
 
 function _getData(cfg, worker) {
   var today = mskToday();
-  var twoDaysAgo = _dateNDaysAgo(2);
-
-  var workers   = _sbGet(cfg, 'workers?select=name&active=eq.true');
-  var orders    = _sbGet(cfg, 'orders?select=order_no,client,company,issue_date,issue_time,return_date,return_time,delivery_worker,site_status,source_active&source_active=eq.true&limit=10000');
-  var statuses  = _sbGet(cfg, 'order_status?select=order_no,issued,returned,issued_by,returned_by&limit=10000');
-  var draftRows = worker ? _sbGet(cfg, 'drafts?select=data&worker=eq.' + encodeURIComponent(worker) + '&limit=1') : [];
-  var otherRows = _sbGet(cfg, 'visits?select=id,visitor,operation,visit_time,visit_date,worker,comment&is_other=eq.true&visit_date=gte.' + twoDaysAgo + '&limit=1000');
+  var snapshot = _sbRpc(cfg, 'warehouse_staff_snapshot', {
+    p_worker: worker || null,
+    p_today: today,
+    p_other_since: today
+  });
+  var workers = snapshot.workers || [];
+  var orders = snapshot.orders || [];
+  var statuses = snapshot.statuses || [];
+  var otherRows = snapshot.otherRows || [];
+  var otherLinks = snapshot.otherLinks || [];
+  var todayEvents = snapshot.todayEvents || [];
 
   var issuedSet = {}, returnedSet = {}, issuedBy = {}, returnedBy = {};
   statuses.forEach(function(r) {
@@ -208,19 +364,85 @@ function _getData(cfg, worker) {
     if (r.returned) { returnedSet[r.order_no] = true; if (r.returned_by) returnedBy[r.order_no] = r.returned_by; }
   });
 
+  var todayProcessed = _processedEvents(todayEvents);
+  var validTodayReturns = _returnsWithIssue(todayProcessed.returned, issuedSet);
   return {
     workers: workers.map(function(w) { return { name: w.name }; }),
-    orders: _buildOrders(orders, today, issuedSet, returnedSet),
+    orders: _buildVisibleOrders(orders, today, issuedSet, returnedSet, todayProcessed.issued, validTodayReturns),
     processedOrders: {
       issued: Object.keys(issuedSet), returned: Object.keys(returnedSet),
+      issuedToday: Object.keys(todayProcessed.issued), returnedToday: Object.keys(validTodayReturns),
       issuedBy: issuedBy, returnedBy: returnedBy,
-      otherVisits: otherRows.map(function(v) {
-        return { id: v.id, visitId: v.id, visitor: v.visitor, operation: v.operation, time: _fmtTime(v.visit_time),
+      otherVisits: otherRows.filter(function(v) {
+        return otherLinks.some(function(link) { return link.visit_id === v.id; });
+      }).map(function(v) {
+        var link = otherLinks.find(function(item) { return item.visit_id === v.id; });
+        return { id: v.id, visitId: v.id, visitor: v.visitor, operation: link && link.operation || v.operation, time: _fmtTime(v.visit_time),
                  date: v.visit_date, worker: v.worker, comment: v.comment || '' };
       })
     },
-    draft: draftRows.length > 0 ? draftRows[0].data : null
+    draft: snapshot.draft || null
   };
+}
+
+function _getUnmatched(cfg) {
+  var snapshot = _sbRpc(cfg, 'warehouse_reconciliation_snapshot', { p_today: mskToday() });
+  return {
+    unmatchedVisits: (snapshot.unmatchedVisits || []).map(function(v) {
+      return {
+        visitKey: v.visitKey, shiftDate: v.shiftDate || '',
+        time: _fmtTime(v.time), worker: v.worker || '',
+        isNight: v.isNight || 'День', visitor: v.visitor || '',
+        operation: v.operation || '', comment: v.comment || '',
+        orders: v.orders || []
+      };
+    }),
+    unlistedOrders: (snapshot.lifecycleViolations || []).map(function(o) {
+      return {
+        id: o.id, client: o.client || '',
+        issueDate: _ddmmyyyy(o.issueDate), returnDate: _ddmmyyyy(o.returnDate),
+        category: o.category, orderType: o.orderType || null,
+        issueCount: Number(o.issueCount || 0), returnCount: Number(o.returnCount || 0),
+        ambiguous: o.ambiguous === true
+      };
+    }),
+    linkCandidates: (snapshot.linkCandidates || []).map(function(o) {
+      return {
+        id: o.id, client: o.client || '',
+        issueDate: _ddmmyyyy(o.issueDate), returnDate: _ddmmyyyy(o.returnDate),
+        orderType: o.orderType || null, ambiguous: o.ambiguous === true,
+        unresolvedVisitIds: Array.isArray(o.unresolvedVisitIds) ? o.unresolvedVisitIds : []
+      };
+    })
+  };
+}
+
+function _getWorkerHistory(cfg, worker) {
+  if (!worker) throw new Error('worker is required');
+  var snapshot = _sbRpc(cfg, 'warehouse_worker_history_snapshot', { p_worker: worker });
+  var shifts = snapshot.shifts || [], visits = snapshot.visits || [], vorders = snapshot.visitOrders || [];
+  var voByVisit = {}, visByShift = {};
+  vorders.forEach(function(o) {
+    if (!voByVisit[o.visit_id]) voByVisit[o.visit_id] = [];
+    voByVisit[o.visit_id].push(o);
+  });
+  visits.forEach(function(v) {
+    if (!visByShift[v.shift_id]) visByShift[v.shift_id] = [];
+    visByShift[v.shift_id].push(v);
+  });
+  return shifts.map(function(s) { return {
+    id: s.id, shiftDate: s.shift_date, shiftStart: s.start_at, shiftEnd: s.end_at,
+    isNight: s.is_night ? 'Ночь' : 'День',
+    entries: (visByShift[s.id] || []).map(function(v) { return {
+      visitor: v.visitor, operation: v.operation,
+      time: _fmtTime(v.visit_time), date: v.visit_date,
+      comment: v.comment || '', isOther: !!v.is_other,
+      orders: (voByVisit[v.id] || []).filter(function(o) { return o.order_no; }).map(function(o) {
+        return { id: o.order_no, operation: o.operation || _normOperation(v.operation), client: o.client_snapshot || '',
+          returnDate: o.return_date_snapshot || '', delivery: o.delivery_snapshot || '' };
+      })
+    }; })
+  }; });
 }
 
 // ─── getAll: для дашборда ────────────────────────────────────
@@ -228,19 +450,22 @@ function _getData(cfg, worker) {
 function _getAll(cfg, fromDate) {
   var today  = mskToday();
   var cutoff = fromDate || _dateNDaysAgo(90);
-
-  var shifts   = _sbGet(cfg, 'shifts?select=*&shift_date=gte.' + cutoff + '&order=shift_date.desc&limit=5000');
-  var visits   = _sbGet(cfg, 'visits?select=*&visit_date=gte.' + cutoff + '&limit=10000');
-  var vorders  = _sbGet(cfg, 'visit_orders?select=*&limit=10000');
-  var orders   = _sbGet(cfg, 'orders?select=order_no,client,company,issue_date,issue_time,return_date,return_time,delivery_worker,site_status,source_active&source_active=eq.true&limit=10000');
-  var statuses = _sbGet(cfg, 'order_status?select=order_no,issued,returned,issued_by,returned_by&limit=10000');
+  var snapshot = _sbRpc(cfg, 'warehouse_dashboard_snapshot', { p_from_date: cutoff });
+  // Ночная смена, начавшаяся накануне периода, уже включена RPC-функцией.
+  var shifts = snapshot.shifts || [];
+  var visits = snapshot.visits || [];
+  var vorders = snapshot.visitOrders || [];
+  var orders = snapshot.orders || [];
+  var statuses = snapshot.statuses || [];
 
   var voByVisit = {}, visByShift = {};
   vorders.forEach(function(o) {
     if (!voByVisit[o.visit_id]) voByVisit[o.visit_id] = [];
     voByVisit[o.visit_id].push(o);
   });
+  var visitById = {};
   visits.forEach(function(v) {
+    visitById[v.id] = v;
     if (!visByShift[v.shift_id]) visByShift[v.shift_id] = [];
     visByShift[v.shift_id].push(v);
   });
@@ -252,14 +477,19 @@ function _getAll(cfg, fromDate) {
       worker: s.worker, isNight: s.is_night ? 'Ночь' : 'День',
       totalEntries: svs.length,
       entries: svs.map(function(v) {
+        var visitLinks = voByVisit[v.id] || [];
+        var otherLink = visitLinks.find(function(o) { return !o.order_no; });
         return {
-          id: v.id, visitId: v.id,
+          id: v.id, visitId: v.id, shiftId: s.id,
           visitor: v.visitor, operation: v.operation, timestamp: s.start_at,
           time: _fmtTime(v.visit_time), timeAuto: _fmtTime(v.visit_time),
           night: v.is_night ? 'Ночь' : 'День', comment: v.comment || '',
           date: v.visit_date || '', isOther: !!v.is_other,
-          orders: (voByVisit[v.id] || []).filter(function(o) { return o.order_no; }).map(function(o) {
-            return { id: o.order_no, operation: o.operation || v.operation, client: o.client_snapshot || '',
+          otherOperation: otherLink && otherLink.operation || null,
+          orders: visitLinks.filter(function(o) { return o.order_no; }).map(function(o) {
+            return { id: o.order_no,
+                     operation: o.operation || _normOperation(v.operation),
+                     needsReview: !o.operation && !_normOperation(v.operation), client: o.client_snapshot || '',
                      returnDate: o.return_date_snapshot || '', delivery: o.delivery_snapshot || '' };
           })
         };
@@ -273,12 +503,20 @@ function _getAll(cfg, fromDate) {
     if (r.returned) { returnedSet[r.order_no] = true; if (r.returned_by) returnedBy[r.order_no] = r.returned_by; }
   });
 
+  var todayProcessed = _processedOnDate(visits, vorders, today);
+  var issuedTodaySet = todayProcessed.issued;
+  var returnedTodaySet = _returnsWithIssue(todayProcessed.returned, issuedSet);
+  var dashboardOrders = _buildVisibleOrders(orders, today, issuedSet, returnedSet, issuedTodaySet, returnedTodaySet);
+
   return {
     shifts: builtShifts,
-    orders: _buildOrders(orders, today, issuedSet, returnedSet),
+    orders: dashboardOrders,
+    archivedOrders: orders.filter(function(o) { return o.manual_hidden === true; }).map(_baseOf),
     processedOrders: {
       issued: Object.keys(issuedSet), returned: Object.keys(returnedSet),
-      issuedBy: issuedBy, returnedBy: returnedBy, otherVisits: []
+      issuedBy: issuedBy, returnedBy: returnedBy,
+      issuedToday: Object.keys(issuedTodaySet), returnedToday: Object.keys(returnedTodaySet),
+      otherVisits: []
     }
   };
 }
@@ -287,10 +525,11 @@ function _getAll(cfg, fromDate) {
 
 function _addVisit(cfg, payload) {
   if (!payload.clientEventId) throw new Error('clientEventId is required');
-  payload.shiftDate = _isoDate(payload.shiftDate);
-  payload.entry.date = _isoDate(payload.entry.date || payload.shiftDate);
+  if (!payload.entry || typeof payload.entry !== 'object') throw new Error('entry is required');
+  payload.shiftDate = _isoDate(payload.shiftDate, 'дата смены');
+  payload.entry.date = _isoDate(payload.entry.date || payload.shiftDate, 'дата визита');
   (payload.entry.orders || []).forEach(function(o) {
-    if (o.returnDate) o.returnDate = _isoDate(o.returnDate);
+    if (o.returnDate) o.returnDate = _isoDate(o.returnDate, 'дата возврата');
     if (!o.operation) o.operation = o.type || payload.entry.operation;
   });
   return _sbRpc(cfg, 'record_warehouse_visit', { p_payload: payload });
@@ -299,8 +538,11 @@ function _addVisit(cfg, payload) {
 // ─── deleteVisit ─────────────────────────────────────────────
 
 function _deleteVisit(cfg, payload) {
-  if (!payload.visitId) throw new Error('visitId is required');
-  return _sbRpc(cfg, 'delete_warehouse_visit', { p_visit_id: payload.visitId });
+  if (!payload.visitId && !payload.clientEventId) throw new Error('visitId or clientEventId is required');
+  return _sbRpc(cfg, 'delete_warehouse_visit', {
+    p_visit_id: payload.visitId || null,
+    p_client_event_id: payload.clientEventId || null
+  });
 }
 
 // ─── linkVisit: привязать «нет в списке» к заказам ──────────
@@ -309,50 +551,41 @@ function _linkVisit(cfg, payload) {
   if (!payload.visitId || !payload.orderIds || !payload.orderIds.length) {
     throw new Error('visitId and orderIds are required');
   }
-  var visits = _sbGet(cfg, 'visits?select=id,operation,is_other&id=eq.' + encodeURIComponent(payload.visitId) + '&limit=1');
-  if (!visits.length) throw new Error('Визит не найден');
-  var visit = visits[0];
-  var ids = payload.orderIds.map(function(id) { return '"' + id.replace(/"/g, '\\"') + '"'; });
-  var orders = _sbGet(cfg, 'orders?select=order_no,client,return_date,delivery_worker&order_no=in.(' + encodeURIComponent(ids.join(',')) + ')&limit=1000');
-  var byId = {};
-  orders.forEach(function(o) { byId[o.order_no] = o; });
-  var rows = payload.orderIds.map(function(id) {
-    var o = byId[id];
-    if (!o) throw new Error('Заказ не найден: ' + id);
-    var op = payload.operations && payload.operations[id] || visit.operation;
-    if (op !== 'issue' && op !== 'return') throw new Error('Неясная операция для заказа ' + id);
-    return { visit_id: visit.id, order_no: id, operation: op,
-      client_snapshot: o.client || '', return_date_snapshot: o.return_date || null,
-      delivery_snapshot: o.delivery_worker ? 'Наша доставка' : 'Самовывоз' };
+  var links = payload.orderIds.map(function(id) {
+    var op = payload.operations && payload.operations[id];
+    if (op !== 'issue' && op !== 'return') {
+      throw new Error('Неясная операция для заказа ' + id);
+    }
+    return { orderId: id, operation: op };
   });
-  _sbPost(cfg, 'visit_orders', rows, 'return=minimal');
-  _sbPatch(cfg, 'visits?id=eq.' + encodeURIComponent(visit.id), { is_other: false });
-  return { ok: true, linked: rows.length };
+  return _sbRpc(cfg, 'link_warehouse_visit', {
+    p_visit_id: payload.visitId,
+    p_links: links
+  });
 }
 
 // ─── saveDraft / clearDraft ───────────────────────────────────
 
 function _saveDraft(cfg, payload) {
-  if (!payload.worker) return { ok: false, error: 'no worker' };
-  var current = _sbGet(cfg, 'drafts?select=saved_at&worker=eq.' + encodeURIComponent(payload.worker) + '&limit=1');
-  var incoming = payload.savedAt || new Date().toISOString();
-  if (current.length && current[0].saved_at && current[0].saved_at > incoming) {
-    return { ok: true, ignored: true, reason: 'newer draft exists' };
-  }
-  _sbUpsert(cfg, 'drafts', { worker: payload.worker, data: payload, saved_at: incoming }, 'worker');
-  return { ok: true };
+  if (!payload.worker || !payload.shiftStart) throw new Error('worker and shiftStart are required');
+  return _sbRpc(cfg, 'save_warehouse_draft', { p_payload: payload });
 }
 
-function _clearDraft(cfg, worker) {
-  if (!worker) return { ok: false, error: 'no worker' };
-  _sbDelete(cfg, 'drafts?worker=eq.' + encodeURIComponent(worker));
-  return { ok: true };
+function _clearDraft(cfg, payload) {
+  if (!payload.worker || (!payload.clientShiftId && !payload.shiftStart)) {
+    throw new Error('worker and clientShiftId or shiftStart are required');
+  }
+  return _sbRpc(cfg, 'clear_warehouse_draft', {
+    p_worker: payload.worker,
+    p_client_shift_id: payload.clientShiftId || null,
+    p_shift_start: payload.shiftStart || null
+  });
 }
 
 // ─── closeShift ──────────────────────────────────────────────
 
 function _closeShift(cfg, payload) {
-  payload.shiftDate = _isoDate(payload.shiftDate);
+  payload.shiftDate = _isoDate(payload.shiftDate, 'дата смены');
   return _sbRpc(cfg, 'close_warehouse_shift', { p_payload: payload });
 }
 
@@ -361,74 +594,89 @@ function _closeShift(cfg, payload) {
 function syncOrders() {
   var cfg = _cfg();
   if (!cfg.url || !cfg.key) return { ok: false, error: 'Не заданы SUPABASE_URL / SUPABASE_SERVICE_KEY' };
+  var lock = typeof LockService !== 'undefined' ? LockService.getScriptLock() : null;
+  if (lock && !lock.tryLock(30000)) return { ok: false, error: 'Синхронизация уже выполняется' };
 
-  var ss    = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName('заказы');
-  if (!sheet || sheet.getLastRow() < 2) return { ok: true, synced: 0 };
+  try {
+    var ss    = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('заказы');
+    if (!sheet || sheet.getLastRow() < 2) return { ok: true, synced: 0 };
 
-  var tz   = 'Europe/Moscow';
-  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
-  var grouped = {};
-  data.filter(function(r) { return r[0]; }).forEach(function(r, idx) {
-    var orderNo = r[0].toString().trim().toUpperCase().replace(/[–—]/g, '-');
-    var issueDate = r[2] ? Utilities.formatDate(parseDate(r[2]), tz, 'yyyy-MM-dd') : null;
-    var returnDate = r[4] ? Utilities.formatDate(parseDate(r[4]), tz, 'yyyy-MM-dd') : null;
-    var row = grouped[orderNo] || {
-      order_no: orderNo, source_row_count: 0, source_active: true, source_rows: []
-    };
-    row.source_row_count++;
-    row.source_rows.push(idx + 2);
-    row.client = r[16] ? r[16].toString().trim() : row.client || '';
-    row.company = r[18] ? r[18].toString().trim() : row.company || '';
-    row.issue_date = !row.issue_date || (issueDate && issueDate < row.issue_date) ? issueDate : row.issue_date;
-    row.issue_time = r[3] ? r[3].toString().trim() : row.issue_time || '';
-    row.return_date = !row.return_date || (returnDate && returnDate > row.return_date) ? returnDate : row.return_date;
-    row.return_time = r[5] ? r[5].toString().trim() : row.return_time || '';
-    row.delivery_worker = r[19] ? r[19].toString().trim() : row.delivery_worker || '';
-    row.site_status = r[6] ? r[6].toString().trim() : row.site_status || '';
-    row.raw = { canonical: r, sourceRows: row.source_rows };
-    row.synced_at = new Date().toISOString();
-    grouped[orderNo] = row;
-  });
-  var rows = Object.keys(grouped).map(function(orderNo) {
-    var r = grouped[orderNo];
-    delete r.source_rows;
-    return r;
-  });
-  /* Legacy mapping kept intentionally out of lifecycle logic:
-    return {
-      order_no:        r[0].toString().trim(),
-      client:          r[16] ? r[16].toString().trim() : '',
-      company:         r[18] ? r[18].toString().trim() : '',
-      issue_date:      r[2] ? Utilities.formatDate(parseDate(r[2]), tz, 'yyyy-MM-dd') : null,
-      issue_time:      r[3] ? r[3].toString().trim() : '',
-      return_date:     r[4] ? Utilities.formatDate(parseDate(r[4]), tz, 'yyyy-MM-dd') : null,
-      return_time:     r[5] ? r[5].toString().trim() : '',
-      delivery_worker: r[19] ? r[19].toString().trim() : '',
-      site_status:     r[6] ? r[6].toString().trim() : '',
-      synced_at:       new Date().toISOString()
-    };
-  }); */
-  if (!rows.length) return { ok: true, synced: 0 };
-
-  var synced = 0, lastCode = 0, lastBody = '';
-  for (var i = 0; i < rows.length; i += 500) {
-    var batch = rows.slice(i, i + 500);
-    var resp = UrlFetchApp.fetch(cfg.url + '/rest/v1/orders?on_conflict=order_no', {
-      method: 'post', contentType: 'application/json',
-      headers: { apikey: cfg.key, Authorization: 'Bearer ' + cfg.key,
-                 Prefer: 'resolution=merge-duplicates,return=minimal' },
-      payload: JSON.stringify(batch), muteHttpExceptions: true
+    var tz = 'Europe/Moscow';
+    var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
+    var sourceRows = data.filter(function(r) { return r[0]; });
+    var grouped = {};
+    data.forEach(function(r, idx) {
+      if (!r[0]) return;
+      var sheetRow = idx + 2;
+      var orderNo = r[0].toString().trim().toUpperCase().replace(/[–—]/g, '-');
+      var issueDate = _sheetDate(r[2], tz, sheetRow, 'выдача');
+      var returnDate = _sheetDate(r[4], tz, sheetRow, 'возврат');
+      var issueTime = _sheetTime(r[3], tz);
+      var returnTime = _sheetTime(r[5], tz);
+      var row = grouped[orderNo] || {
+        order_no: orderNo,
+        client: '', company: '',
+        issue_date: null, issue_time: '',
+        return_date: null, return_time: '',
+        delivery_worker: '', site_status: '', raw: null,
+        source_row_count: 0, source_active: true, source_rows: []
+      };
+      row.source_row_count++;
+      row.source_rows.push(sheetRow);
+      row.client = r[16] ? r[16].toString().trim() : row.client || '';
+      row.company = r[18] ? r[18].toString().trim() : row.company || '';
+      if (issueDate && (!row.issue_date || issueDate < row.issue_date)) {
+        row.issue_date = issueDate; row.issue_time = issueTime;
+      } else if (issueDate === row.issue_date && !row.issue_time) {
+        row.issue_time = issueTime;
+      }
+      if (returnDate && (!row.return_date || returnDate > row.return_date)) {
+        row.return_date = returnDate; row.return_time = returnTime;
+      } else if (returnDate === row.return_date && !row.return_time) {
+        row.return_time = returnTime;
+      }
+      row.delivery_worker = r[19] ? r[19].toString().trim() : row.delivery_worker || '';
+      row.site_status = r[6] ? r[6].toString().trim() : row.site_status || '';
+      row.raw = { canonical: r, sourceRows: row.source_rows };
+      grouped[orderNo] = row;
     });
-    lastCode = resp.getResponseCode();
-    lastBody = resp.getContentText();
-    if (lastCode >= 200 && lastCode < 300) synced += batch.length; else break;
+    if (!sourceRows.length) return { ok: true, synced: 0 };
+
+    var syncId = Utilities.getUuid ? Utilities.getUuid() : String(new Date().getTime());
+    var syncedAt = new Date().toISOString();
+    var rows = Object.keys(grouped).map(function(orderNo) {
+      var row = grouped[orderNo];
+      delete row.source_rows;
+      row.source_sync_id = syncId;
+      row.synced_at = syncedAt;
+      return row;
+    });
+
+    var synced = 0, lastCode = 0, lastBody = '';
+    for (var i = 0; i < rows.length; i += 500) {
+      var batch = rows.slice(i, i + 500);
+      var resp = UrlFetchApp.fetch(cfg.url + '/rest/v1/orders?on_conflict=order_no', {
+        method: 'post', contentType: 'application/json',
+        headers: { apikey: cfg.key, Authorization: 'Bearer ' + cfg.key,
+                   Prefer: 'resolution=merge-duplicates,return=minimal' },
+        payload: JSON.stringify(batch), muteHttpExceptions: true
+      });
+      lastCode = resp.getResponseCode();
+      lastBody = resp.getContentText();
+      if (lastCode >= 200 && lastCode < 300) synced += batch.length; else break;
+    }
+    if (lastCode < 200 || lastCode >= 300) {
+      return { ok: false, synced: synced, code: lastCode, error: lastBody };
+    }
+
+    var staleFilter = encodeURIComponent('(source_sync_id.is.null,source_sync_id.neq.' + syncId + ')');
+    _sbPatch(cfg, 'orders?or=' + staleFilter, { source_active: false });
+    return { ok: true, synced: synced, sourceRows: sourceRows.length,
+             duplicateRowsMerged: sourceRows.length - rows.length };
+  } finally {
+    if (lock) lock.releaseLock();
   }
-  if (lastCode < 200 || lastCode >= 300) return { ok: false, synced: synced, code: lastCode, error: lastBody };
-  var ids = rows.map(function(r) { return '"' + r.order_no.replace(/"/g, '\\"') + '"'; });
-  if (ids.length) _sbPatch(cfg, 'orders?order_no=not.in.(' + encodeURIComponent(ids.join(',')) + ')', { source_active: false });
-  return { ok: true, synced: synced, sourceRows: data.filter(function(r) { return r[0]; }).length,
-           duplicateRowsMerged: data.filter(function(r) { return r[0]; }).length - rows.length };
 }
 
 function setupSyncTrigger() {
@@ -446,12 +694,14 @@ function doGet(e) {
   var action = (e && e.parameter && e.parameter.action) || '';
   var result;
   try {
-    if      (action === 'getData')    result = _getData(cfg, e.parameter.worker || null);
-    else if (action === 'getAll')     result = _getAll(cfg, e.parameter.fromDate || null);
-    else if (action === 'syncOrders') result = syncOrders();
+    if      (action === 'getData')          result = _getData(cfg, e.parameter.worker || null);
+    else if (action === 'getAll')           result = _getAll(cfg, e.parameter.fromDate || null);
+    else if (action === 'getUnmatched')     result = _getUnmatched(cfg);
+    else if (action === 'getWorkerHistory') result = _getWorkerHistory(cfg, e.parameter.worker || null);
+    else if (action === 'syncOrders')       result = syncOrders();
     else                              throw new Error('Unknown action: ' + action);
   } catch(err) {
-    result = { ok: false, error: err.toString() };
+    result = { ok: false, error: err.toString(), retryable: err.retryable === true };
   }
   if (result && result.ok === undefined) result = { ok: true, data: result };
   return ContentService.createTextOutput(JSON.stringify(result))
@@ -472,13 +722,13 @@ function doPost(e) {
   try {
     if      (action === 'addVisit')   result = _addVisit(cfg, payload);
     else if (action === 'saveDraft')  result = _saveDraft(cfg, payload);
-    else if (action === 'clearDraft') result = _clearDraft(cfg, payload.worker);
+    else if (action === 'clearDraft') result = _clearDraft(cfg, payload);
     else if (action === 'closeShift') result = _closeShift(cfg, payload);
     else if (action === 'deleteVisit')result = _deleteVisit(cfg, payload);
     else if (action === 'linkVisit')  result = _linkVisit(cfg, payload);
     else                              throw new Error('Unknown action: ' + action);
   } catch(err) {
-    result = { ok: false, error: err.toString() };
+    result = { ok: false, error: err.toString(), retryable: err.retryable === true };
   }
   if (result && result.ok === undefined) result = { ok: true, data: result };
   return ContentService.createTextOutput(JSON.stringify(result))
