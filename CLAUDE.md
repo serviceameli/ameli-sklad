@@ -19,7 +19,7 @@
 
 **Apps Script URL (актуальный, деплой 11.06.2026):**
 ```
-https://script.google.com/macros/s/AKfycbx4yu_6LSG-NSleYTMkmgnQuO5tT1urq2p03rTKdFu6818RckZKxvByPydWQX9DP2s/exec
+https://script.google.com/macros/s/AKfycby9afDG1NPl2U9n-7pEV4rSfqoyWoXCHBM1LesH2zRXfOZ4mtly8yCB0prAx6Twcnc/exec
 ```
 Единственный источник истины — `config.js`; этот блок просто дублирует его для справки.
 
