@@ -485,3 +485,43 @@ test('reset epoch blocks stale payload writes at the database boundary', async (
     await db.close();
   }
 });
+
+test('reconciliation treats today tasks as planned work, not violations', async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(read('supabase/migrations/202607120000_base_schema.sql'));
+    await db.exec(read('supabase/migrations/202607130001_order_lifecycle.sql'));
+    await db.exec(read('supabase/migrations/202607140003_reconciliation_overdue_only.sql'));
+    await db.exec(read('supabase/migrations/202607140003_reconciliation_overdue_only.sql'));
+    await db.exec(`
+      insert into public.orders(order_no, issue_date, return_date) values
+        ('TODAY-ISSUE', '2026-07-17', '2026-07-18'),
+        ('OVERDUE-ISSUE', '2026-07-16', '2026-07-18'),
+        ('TODAY-RETURN', '2026-07-16', '2026-07-17'),
+        ('OVERDUE-RETURN', '2026-07-15', '2026-07-16');
+      insert into public.visits(id, worker, visitor, operation, comment) values
+        ('00000000-0000-0000-0000-000000000201', 'Система', 'client', 'issue', 'baseline'),
+        ('00000000-0000-0000-0000-000000000202', 'Система', 'client', 'issue', 'baseline');
+      insert into public.visit_orders(visit_id, order_no, operation) values
+        ('00000000-0000-0000-0000-000000000201', 'TODAY-RETURN', 'issue'),
+        ('00000000-0000-0000-0000-000000000202', 'OVERDUE-RETURN', 'issue');
+    `);
+
+    const reconciliation = await rpc(db, 'warehouse_reconciliation_snapshot', ['2026-07-17'], ['date']);
+    const category = Object.fromEntries(
+      reconciliation.lifecycleViolations.map(row => [row.id, row.category])
+    );
+    assert.equal(category['TODAY-ISSUE'], undefined);
+    assert.equal(category['TODAY-RETURN'], undefined);
+    assert.equal(category['OVERDUE-ISSUE'], 'missing_issue');
+    assert.equal(category['OVERDUE-RETURN'], 'missing_return');
+
+    await db.exec(read('supabase/rollbacks/202607140003_reconciliation_overdue_only.sql'));
+    const legacy = await rpc(db, 'warehouse_reconciliation_snapshot', ['2026-07-17'], ['date']);
+    const legacyIds = new Set(legacy.lifecycleViolations.map(row => row.id));
+    assert.equal(legacyIds.has('TODAY-ISSUE'), true);
+    assert.equal(legacyIds.has('TODAY-RETURN'), true);
+  } finally {
+    await db.close();
+  }
+});
