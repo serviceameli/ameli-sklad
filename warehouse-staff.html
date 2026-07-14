@@ -337,8 +337,8 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
 .oc-status.overdue{background:rgba(231,76,60,.15);color:#c0392b;animation:pulse 2s infinite}
 </style>
   <script src="vendor/supabase.min.js"></script>
-  <script src="config.js?v=20260714"></script>
-  <script src="api.js?v=20260714"></script>
+  <script src="config.js?v=20260714-reset1"></script>
+  <script src="api.js?v=20260714-reset1"></script>
 </head>
 <body>
 
@@ -601,6 +601,30 @@ const LS = {
   set(key, val){ try{ localStorage.setItem(key, val); return true; }catch(e){ return false; } },
   remove(key){ try{ localStorage.removeItem(key); }catch(e){} }
 };
+const CLIENT_DATA_EPOCH = window.WAREHOUSE_DATA_EPOCH || '2026-07-14-full-reset-v1';
+const CLIENT_DATA_EPOCH_KEY = 'wh_data_epoch';
+
+function isOperationalStorageKey(key){
+  return key==='wh_draft'||key.startsWith('wh_draft_')
+    ||key==='wh_pending_visits'||key==='wh_visit_acks'||key==='wh_shifts';
+}
+
+// Одноразово удаляем только рабочее состояние до первой попытки дослать
+// старую офлайн-очередь. Авторизация кладовщиков (wh_auth_*) сохраняется.
+function applyClientDataEpoch(){
+  try{
+    if(localStorage.getItem(CLIENT_DATA_EPOCH_KEY)===CLIENT_DATA_EPOCH) return false;
+    const keys=[];
+    for(let i=0;i<localStorage.length;i++){
+      const key=localStorage.key(i);
+      if(typeof key==='string') keys.push(key);
+    }
+    keys.filter(isOperationalStorageKey).forEach(key=>localStorage.removeItem(key));
+    localStorage.setItem(CLIENT_DATA_EPOCH_KEY,CLIENT_DATA_EPOCH);
+    return true;
+  }catch(e){ return false; }
+}
+applyClientDataEpoch();
 // DRAFT_KEY убран — используем draftKey() который зависит от имени кладовщика
 const AUTOSAVE_INT= 15000;
 const ICONS = ['👩','👨','🧑','👩','👩','👨'];

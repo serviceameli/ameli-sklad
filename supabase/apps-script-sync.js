@@ -14,6 +14,18 @@
 //  → обновить SYNC_URL в config.js
 // ═══════════════════════════════════════════════════════════════
 
+// Записи от вкладок, открытых до полного сброса, не должны восстанавливать
+// старые смены, черновики и офлайн-визиты.
+var WAREHOUSE_DATA_EPOCH = '2026-07-14-full-reset-v1';
+
+function _requireDataEpoch(payload) {
+  if (!payload || payload.dataEpoch !== WAREHOUSE_DATA_EPOCH) {
+    var err = new Error('Страница склада устарела. Закройте её и откройте ссылку заново.');
+    err.retryable = false;
+    throw err;
+  }
+}
+
 function _cfg() {
   var p = PropertiesService.getScriptProperties();
   return { url: p.getProperty('SUPABASE_URL'), key: p.getProperty('SUPABASE_SERVICE_KEY') };
@@ -720,13 +732,16 @@ function doPost(e) {
   var action = payload.action || '';
   var result;
   try {
+    if (['addVisit', 'saveDraft', 'clearDraft', 'closeShift', 'deleteVisit', 'linkVisit'].indexOf(action) < 0) {
+      throw new Error('Unknown action: ' + action);
+    }
+    _requireDataEpoch(payload);
     if      (action === 'addVisit')   result = _addVisit(cfg, payload);
     else if (action === 'saveDraft')  result = _saveDraft(cfg, payload);
     else if (action === 'clearDraft') result = _clearDraft(cfg, payload);
     else if (action === 'closeShift') result = _closeShift(cfg, payload);
     else if (action === 'deleteVisit')result = _deleteVisit(cfg, payload);
     else if (action === 'linkVisit')  result = _linkVisit(cfg, payload);
-    else                              throw new Error('Unknown action: ' + action);
   } catch(err) {
     result = { ok: false, error: err.toString(), retryable: err.retryable === true };
   }

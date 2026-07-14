@@ -7,6 +7,11 @@
 // ═══════════════════════════════════════════════════════════════
 (function (global) {
 
+  // Одноразовый барьер полного сброса данных. Apps Script отклоняет записи
+  // от старых открытых вкладок, в которых этого значения ещё нет.
+  var DATA_EPOCH = '2026-07-14-full-reset-v1';
+  global.WAREHOUSE_DATA_EPOCH = DATA_EPOCH;
+
   function apiError(payload, fallback) {
     var msg = payload && (payload.error && (payload.error.message || payload.error) || payload.message);
     var err = new Error(msg || fallback || 'Ошибка сервера');
@@ -37,6 +42,7 @@
 
   // ── POST через Apps Script (Content-Type:text/plain — нет preflight) ──
   function asPost(body) {
+    body.dataEpoch = DATA_EPOCH;
     return fetch(SYNC_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain' },

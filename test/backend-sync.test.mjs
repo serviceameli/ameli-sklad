@@ -82,6 +82,19 @@ test('RPC transport errors retry, while database constraints do not', () => {
     error => error.retryable === true);
 });
 
+test('write barrier rejects tabs opened before the full reset', () => {
+  const c = context();
+  assert.doesNotThrow(() => c._requireDataEpoch({ dataEpoch: '2026-07-14-full-reset-v1' }));
+  assert.throws(
+    () => c._requireDataEpoch({ dataEpoch: 'old-page' }),
+    error => error.retryable === false && /устарела/.test(error.message)
+  );
+  assert.throws(
+    () => c._requireDataEpoch({}),
+    error => error.retryable === false && /откройте ссылку заново/.test(error.message)
+  );
+});
+
 test('reconciliation backend consumes one snapshot and exposes duplicate counts', () => {
   const c = context();
   const calls = [];

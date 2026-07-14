@@ -33,7 +33,15 @@ function inlineScript(file) {
 }
 
 function frontendContext(file, extra = {}) {
-  const storage = new Map();
+  const { initialStorage = {}, ...contextExtra } = extra;
+  const storage = new Map(Object.entries(initialStorage));
+  const localStorage = {
+    get length() { return storage.size; },
+    key: index => [...storage.keys()][index] ?? null,
+    getItem: key => storage.get(key) ?? null,
+    setItem: (key, value) => storage.set(key, String(value)),
+    removeItem: key => storage.delete(key)
+  };
   const elements = new Map();
   const element = id => {
     if (!elements.has(id)) elements.set(id, {
@@ -46,7 +54,7 @@ function frontendContext(file, extra = {}) {
   const context = {
     console, Date, JSON, Math, Set, Map, Promise, URLSearchParams,
     setTimeout: () => 0, clearTimeout() {}, setInterval: () => 0, clearInterval() {},
-    localStorage: { getItem: k => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, String(v)), removeItem: k => storage.delete(k) },
+    localStorage,
     location: { search: '' }, navigator: { onLine: true },
     crypto: { randomUUID: () => 'test-uuid' },
     document: {
@@ -58,7 +66,7 @@ function frontendContext(file, extra = {}) {
     },
     window: { addEventListener() {}, scrollTo() {}, confirm: () => true },
     Blob: class {}, URL: { createObjectURL: () => 'blob:test' },
-    ...extra
+    ...contextExtra
   };
   context.globalThis = context;
   context.window.window = context.window;
@@ -219,6 +227,57 @@ test('frontend queue removes items by stable clientEventId', () => {
   assert.match(staff, /clientEventId:newClientId\('visit'\)/);
   assert.match(staff, /x\.clientEventId!==eventId/);
   assert.doesNotMatch(staff, /findIndex\(x=>x\.entry&&p\.entry&&x\.entry\.timeAuto/);
+});
+
+test('client data epoch clears only operational local state before queue recovery', async () => {
+  let addVisitCalls = 0;
+  const pending = JSON.stringify([{ clientEventId: 'old-event', worker: 'Склад', shiftStart: '2026-07-01T06:00:00.000Z', entry: {} }]);
+  const { context, storage } = frontendContext('warehouse-staff.html', {
+    initialStorage: {
+      wh_draft: '{}',
+      'wh_draft_Иван': '{}',
+      wh_draft_conflict: '{}',
+      'wh_draft_conflict_Иван': '{}',
+      wh_pending_visits: pending,
+      wh_visit_acks: '{}',
+      wh_shifts: '[]',
+      'wh_auth_Иван': '1',
+      unrelated_key: 'keep'
+    },
+    WHApi: { addVisit: async () => { addVisitCalls++; return { visitId: 'unexpected' }; } }
+  });
+
+  for (const key of ['wh_draft', 'wh_draft_Иван', 'wh_draft_conflict',
+    'wh_draft_conflict_Иван', 'wh_pending_visits', 'wh_visit_acks', 'wh_shifts']) {
+    assert.equal(storage.has(key), false, `${key} must be cleared`);
+  }
+  assert.equal(storage.get('wh_auth_Иван'), '1');
+  assert.equal(storage.get('unrelated_key'), 'keep');
+  assert.equal(storage.get('wh_data_epoch'), '2026-07-14-full-reset-v1');
+  assert.equal(await context.flushPendingVisits(), true);
+  assert.equal(addVisitCalls, 0);
+});
+
+test('client data epoch is one-shot and a stale marker triggers the next cleanup', () => {
+  const { context, storage } = frontendContext('warehouse-staff.html', {
+    initialStorage: { wh_data_epoch: 'previous-epoch', 'wh_draft_Иван': '{}', 'wh_auth_Иван': '1' }
+  });
+  assert.equal(storage.has('wh_draft_Иван'), false);
+  assert.equal(storage.get('wh_data_epoch'), '2026-07-14-full-reset-v1');
+
+  storage.set('wh_draft_Иван', '{"new":true}');
+  assert.equal(context.applyClientDataEpoch(), false);
+  assert.equal(storage.get('wh_draft_Иван'), '{"new":true}');
+  assert.equal(storage.get('wh_auth_Иван'), '1');
+});
+
+test('client data reset runs before init can flush the offline queue', () => {
+  const staff = read('warehouse-staff.html');
+  const resetCall = staff.indexOf('applyClientDataEpoch();');
+  const initDefinition = staff.indexOf('async function init()');
+  const firstFlush = staff.indexOf('flushPendingVisits();', initDefinition);
+  assert.ok(resetCall >= 0 && resetCall < initDefinition);
+  assert.ok(resetCall < firstFlush);
 });
 
 test('legacy offline queue gets one deterministic persisted event id', () => {
@@ -599,8 +658,10 @@ test('client clears only the intended draft generation', async () => {
   vm.createContext(context); vm.runInContext(read('api.js'), context);
   await context.window.WHApi.clearDraft({ worker: 'Склад', clientShiftId: 'shift-new', shiftStart: '2026-07-15T06:00:00Z' });
   assert.deepEqual(body, {
-    action: 'clearDraft', worker: 'Склад', clientShiftId: 'shift-new', shiftStart: '2026-07-15T06:00:00Z'
+    action: 'clearDraft', worker: 'Склад', clientShiftId: 'shift-new', shiftStart: '2026-07-15T06:00:00Z',
+    dataEpoch: '2026-07-14-full-reset-v1'
   });
+  assert.equal(context.window.WAREHOUSE_DATA_EPOCH, '2026-07-14-full-reset-v1');
 });
 
 test('same-shift drafts from two devices are merged without trusting client savedAt', () => {
