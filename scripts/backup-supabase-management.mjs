@@ -27,6 +27,10 @@ select jsonb_build_object(
   'visit_orders', coalesce((select jsonb_agg(to_jsonb(x) order by x.id) from public.visit_orders x), '[]'::jsonb),
   'drafts', coalesce((select jsonb_agg(to_jsonb(x) order by x.worker) from public.drafts x), '[]'::jsonb),
   'order_status', coalesce((select jsonb_agg(to_jsonb(x) order by x.order_no) from public.order_status x), '[]'::jsonb),
+  'warehouse_event_receipts', coalesce((
+    select jsonb_agg(to_jsonb(x) order by x.client_event_id)
+    from public.warehouse_event_receipts x
+  ), '[]'::jsonb),
   'catalog', jsonb_build_object(
     'columns', coalesce((
       select jsonb_agg(to_jsonb(c) order by c.table_name, c.ordinal_position)
