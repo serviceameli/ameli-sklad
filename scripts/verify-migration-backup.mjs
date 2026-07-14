@@ -5,6 +5,9 @@ const moduleName = process.env.PGLITE_MODULE || '@electric-sql/pglite';
 const { PGlite } = await import(moduleName);
 const backupDir = process.argv[2];
 if (!backupDir) throw new Error('Usage: node scripts/verify-migration-backup.mjs <backup-directory>');
+const restoreFlag = process.argv.indexOf('--restore-sql');
+const restoreFile = restoreFlag >= 0 ? process.argv[restoreFlag + 1] : null;
+if (restoreFlag >= 0 && !restoreFile) throw new Error('--restore-sql requires a file path');
 
 const root = new URL('../', import.meta.url);
 const sql = file => fs.readFileSync(new URL(file, root), 'utf8');
@@ -47,6 +50,7 @@ try {
     where vo.order_no is not null group by vo.order_no`);
 
   const before = (await db.query('select count(*)::int as n from public.visits')).rows[0].n;
+  const linksBefore = (await db.query('select count(*)::int as n from public.visit_orders')).rows[0].n;
   await db.exec(sql('supabase/migrations/202607130001_order_lifecycle.sql'));
 
   const expectedLegacyHidden = orderRows.filter(row => row.deleted_at != null).length;
@@ -97,10 +101,19 @@ try {
   assert(before - after === 52, `expected 52 safe deletions, got ${before - after}`);
   assert(ambiguousAfter === 2, 'ambiguous visits must not be deleted');
   assert(manualDuplicate === 2, 'the disputed double issue must remain for manual review');
+  let restored = null;
+  if (restoreFile) {
+    await db.exec(fs.readFileSync(path.resolve(restoreFile), 'utf8'));
+    const restoredVisits = (await db.query('select count(*)::int as n from public.visits')).rows[0].n;
+    const restoredLinks = (await db.query('select count(*)::int as n from public.visit_orders')).rows[0].n;
+    assert(restoredVisits === before, `restore expected ${before} visits, got ${restoredVisits}`);
+    assert(restoredLinks === linksBefore, `restore expected ${linksBefore} links, got ${restoredLinks}`);
+    restored = { visits: restoredVisits, visitOrders: restoredLinks };
+  }
   console.log(JSON.stringify({ before, after, deleted: before - after,
     legacyDraftVisitsLinked: linkedDraftVisits, ambiguousKept: ambiguousAfter,
     disputedIssuesKept: manualDuplicate, legacyHiddenKept: migratedLegacyHidden,
-    ambiguousOrdersQuarantined: ambiguousOrderIds.length }, null, 2));
+    ambiguousOrdersQuarantined: ambiguousOrderIds.length, restored }, null, 2));
 } finally {
   await db.close();
 }
