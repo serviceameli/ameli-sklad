@@ -413,3 +413,75 @@ test('an active draft reserves one worker shift without blocking idempotent repl
     await db.close();
   }
 });
+
+test('reset epoch blocks stale payload writes at the database boundary', async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(read('supabase/migrations/202607120000_base_schema.sql'));
+    await db.exec(read('supabase/migrations/202607130001_order_lifecycle.sql'));
+    await db.exec(read('supabase/migrations/202607140001_reset_epoch_guard.sql'));
+    await db.exec(read('supabase/migrations/202607140001_reset_epoch_guard.sql'));
+    await db.exec(`
+      insert into public.workers(name, active) values ('Тестовый кладовщик', true);
+      insert into public.orders(order_no, issue_date, return_date)
+      values ('EPOCH-1', '2026-07-20', '2026-07-22');
+    `);
+
+    const draft = {
+      worker: 'Тестовый кладовщик', clientShiftId: 'epoch-shift',
+      shiftStart: '2026-07-20T06:00:00Z', shiftDate: '2026-07-20', visits: []
+    };
+    await assert.rejects(
+      rpc(db, 'save_warehouse_draft', [JSON.stringify(draft)], ['jsonb']),
+      /Страница склада устарела/
+    );
+    await rpc(db, 'save_warehouse_draft', [JSON.stringify({
+      ...draft, dataEpoch: '2026-07-14-full-reset-v1'
+    })], ['jsonb']);
+
+    const visit = visitPayload('epoch-event', 'EPOCH-1', 'issue', '10:00');
+    Object.assign(visit, {
+      clientShiftId: draft.clientShiftId,
+      shiftStart: draft.shiftStart,
+      shiftDate: draft.shiftDate
+    });
+    visit.entry.date = draft.shiftDate;
+    visit.entry.orders[0].returnDate = '2026-07-22';
+    await assert.rejects(
+      rpc(db, 'record_warehouse_visit', [JSON.stringify(visit)], ['jsonb']),
+      /Страница склада устарела/
+    );
+    await rpc(db, 'record_warehouse_visit', [JSON.stringify({
+      ...visit, dataEpoch: '2026-07-14-full-reset-v1'
+    })], ['jsonb']);
+
+    const close = {
+      ...draft, shiftEnd: '2026-07-20T12:00:00Z', isNight: 'День'
+    };
+    await assert.rejects(
+      rpc(db, 'close_warehouse_shift', [JSON.stringify(close)], ['jsonb']),
+      /Страница склада устарела/
+    );
+    const closed = await rpc(db, 'close_warehouse_shift', [JSON.stringify({
+      ...close, dataEpoch: '2026-07-14-full-reset-v1'
+    })], ['jsonb']);
+    assert.equal(closed.ok, true);
+
+    await db.exec(read('supabase/rollbacks/202607140001_reset_epoch_guard.sql'));
+    const guard = await db.query(`select to_regprocedure(
+      'public.warehouse_assert_data_epoch(jsonb)') as value`);
+    assert.equal(guard.rows[0].value, null);
+    const definitions = await db.query(`
+      select lower(pg_get_functiondef(signature)) as definition
+      from unnest(array[
+        'public.record_warehouse_visit(jsonb)'::regprocedure,
+        'public.save_warehouse_draft(jsonb)'::regprocedure,
+        'public.close_warehouse_shift(jsonb)'::regprocedure
+      ]) signature
+    `);
+    assert.equal(definitions.rows.some(row =>
+      row.definition.includes('warehouse_assert_data_epoch(p_payload)')), false);
+  } finally {
+    await db.close();
+  }
+});

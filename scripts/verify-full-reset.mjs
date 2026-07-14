@@ -42,6 +42,7 @@ try {
     await db.exec('alter table public.orders add column if not exists deleted_at timestamptz');
   }
   await db.exec(migration('supabase/migrations/202607130001_order_lifecycle.sql'));
+  await db.exec(migration('supabase/migrations/202607140001_reset_epoch_guard.sql'));
 
   await load('orders', snapshot.orders);
   await load('workers', snapshot.workers);
