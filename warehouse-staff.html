@@ -244,6 +244,10 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
 /* ── VIEW-ONLY BANNER ── */
 .vo-banner{background:var(--black);color:#fff;padding:10px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px}
 .vo-banner-txt{font-size:12px;font-weight:600;color:rgba(255,255,255,.75)}
+.draft-conflict{display:none;margin:10px 15px;padding:12px 14px;border:1px solid #E74C3C;border-radius:12px;background:#fff1ef;color:#8f2d22;font-size:12px;line-height:1.4}
+.draft-conflict.show{display:block}
+.draft-conflict b{display:block;margin-bottom:4px}
+.draft-conflict button{margin-top:9px;width:100%;border:0;border-radius:8px;background:#E74C3C;color:#fff;padding:9px 10px;font:inherit;font-weight:700}
 .vo-start-btn{flex-shrink:0;background:var(--accent);color:var(--black);border:none;border-radius:8px;padding:7px 13px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap}
 
 /* ── SUCCESS ── */
@@ -333,8 +337,8 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
 .oc-status.overdue{background:rgba(231,76,60,.15);color:#c0392b;animation:pulse 2s infinite}
 </style>
   <script src="vendor/supabase.min.js"></script>
-  <script src="config.js?v=3"></script>
-  <script src="api.js?v=3"></script>
+  <script src="config.js?v=20260714"></script>
+  <script src="api.js?v=20260714"></script>
 </head>
 <body>
 
@@ -458,6 +462,11 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
   <div class="vo-banner" id="voBanner" style="display:none">
     <span class="vo-banner-txt">👀 Только просмотр — добавление визитов недоступно</span>
     <button class="vo-start-btn" onclick="startShiftFromViewOnly()">Начать смену →</button>
+  </div>
+  <div class="draft-conflict" id="draftConflictBanner">
+    <b id="draftConflictTitle">⚠️ На другом устройстве уже открыта смена</b>
+    <span id="draftConflictText">Локальные визиты сохранены и не потеряны.</span>
+    <button type="button" id="draftConflictButton" onclick="resolveDraftConflict()">Перенести мои визиты в открытую смену</button>
   </div>
 
   <!-- Счётчик заказов — виден всегда -->
@@ -604,11 +613,15 @@ const VIS_LBL = {client:'Клиент',yandex:'Яндекс',our:'Наш кур�
 const OP_LBL  = {issue:'Выдача',return:'Возврат',pickup:'Выдача',dropoff:'Возврат',both:'Выдача и возврат'};
 
 let workers=[], orders=[], visits=[];
-let worker=null, visitor=null, operation=null, shiftStart=null;
+let worker=null, visitor=null, operation=null, shiftStart=null, clientShiftId=null;
 let viewOnlyMode=false;
 let personalWorkerUrl=null; // имя из ?worker= параметра, null если общая ссылка
 let pendingOrders=[];
 let autosaveTimer=null, formOpen=true, currentShiftTab='add';
+let draftSaveChain=Promise.resolve();
+let closingShift=false;
+let openingShift=false;
+let draftConflict=null;
 let hasOther=false;
 let serverIssuedToday   = new Set();
 let serverReturnedToday = new Set();
@@ -619,6 +632,101 @@ let serverOtherVisits = [];  // визиты «не из списка» из л�
 // Ключ localStorage зависит от кладовщика — чтобы у каждого своё хранилище
 function draftKey(){ return worker ? 'wh_draft_'+worker.replace(/\s+/g,'_') : 'wh_draft'; }
 function authKey(w){ return 'wh_auth_'+w.replace(/\s+/g,'_'); }
+function newClientId(prefix){
+  const id=globalThis.crypto?.randomUUID?.()||(`${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  return `${prefix||'evt'}-${id}`;
+}
+function stableHash(value){
+  let h=2166136261;
+  for(let i=0;i<value.length;i++){h^=value.charCodeAt(i);h=Math.imul(h,16777619);}
+  return (h>>>0).toString(16).padStart(8,'0');
+}
+function eventFingerprint(payload){
+  const e=payload.entry||payload;
+  const ords=(e.orders||[]).map(o=>[o.id||'',o.operation||o.type||'']).sort((a,b)=>String(a[0]).localeCompare(String(b[0])));
+  return JSON.stringify([
+    payload.worker||worker||'',payload.shiftStart||(shiftStart?.toISOString()||''),
+    e.timestamp||e.ts||'',e.date||'',e.time||'',e.timeAuto||'',e.visitor||'',e.operation||'',ords,e.comment||''
+  ]);
+}
+function legacyClientEventId(payload){ return 'visit-legacy-'+stableHash(eventFingerprint(payload)); }
+function sameDraftShift(a,b){
+  if(!a||!b) return false;
+  if(a.clientShiftId&&b.clientShiftId&&a.clientShiftId===b.clientShiftId) return true;
+  const as=Date.parse(a.shiftStart||'');
+  const bs=Date.parse(b.shiftStart||'');
+  return !!a.worker&&a.worker===b.worker&&Number.isFinite(as)&&as===bs;
+}
+function draftVisitFingerprint(v){
+  return JSON.stringify([
+    v?.visitor||'',v?.operation||'',v?.date||'',v?.time||'',v?.timeAuto||'',v?.comment||'',
+    (v?.orders||[]).map(o=>[o.id||'',o.operation||o.type||'']).sort((a,b)=>String(a[0]).localeCompare(String(b[0])))
+  ]);
+}
+function mergeDraftVisits(first,second){
+  const merged=[];
+  [...(Array.isArray(first)?first:[]),...(Array.isArray(second)?second:[])].forEach(v=>{
+    if(!v||typeof v!=='object') return;
+    const fp=draftVisitFingerprint(v);
+    const idx=merged.findIndex(old=>
+      (v.clientEventId&&old.clientEventId&&v.clientEventId===old.clientEventId)
+      || ((!v.clientEventId||!old.clientEventId)&&draftVisitFingerprint(old)===fp));
+    if(idx<0){merged.push({...v});return;}
+    const old=merged[idx];
+    const next={...old,...v};
+    next.clientEventId=v.clientEventId||old.clientEventId;
+    next.visitId=v.visitId||old.visitId;
+    next.shiftId=v.shiftId||old.shiftId;
+    if(next.visitId){next.syncBlocked=false;next.syncError=null;}
+    else if(old.syncBlocked||v.syncBlocked){next.syncBlocked=true;next.syncError=v.syncError||old.syncError||'Сервер отклонил визит';}
+    merged[idx]=next;
+  });
+  return merged;
+}
+function pickNewestDraft(localRaw, serverDraft){
+  let local=null;
+  try{ local=localRaw?JSON.parse(localRaw):null; }catch(e){}
+  if(!local) return serverDraft||null;
+  if(!serverDraft) return local;
+  if(sameDraftShift(local,serverDraft)){
+    return {...serverDraft,...local,
+      clientShiftId:local.clientShiftId||serverDraft.clientShiftId,
+      savedAt:serverDraft.savedAt||local.savedAt,
+      visits:mergeDraftVisits(serverDraft.visits,local.visits)};
+  }
+  // savedAt с устройства недоверенный. Для разных смен сравниваем их начало.
+  const localStart=Date.parse(local.shiftStart||'');
+  const serverStart=Date.parse(serverDraft.shiftStart||'');
+  if(!Number.isFinite(localStart)) return serverDraft;
+  if(!Number.isFinite(serverStart)) return local;
+  return serverStart>=localStart?serverDraft:local;
+}
+function normalizeDraft(draft){
+  if(!draft||typeof draft!=='object'||!Array.isArray(draft.visits)) throw new Error('Черновик повреждён: неверный список визитов');
+  const start=new Date(draft.shiftStart||'');
+  if(!draft.worker||isNaN(start.getTime())) throw new Error('Черновик повреждён: нет кладовщика или начала смены');
+  if(worker&&draft.worker!==worker) throw new Error('Черновик принадлежит другому кладовщику');
+  const cleanVisits=draft.visits.slice(0,500).filter(v=>v&&typeof v==='object').map((v,i)=>{
+    const visitor=VIS_LBL[v.visitor]?v.visitor:'invalid';
+    const op=OP_LBL[v.operation]?v.operation:'invalid';
+    const validTime=t=>typeof t==='string'&&/^([01]\d|2[0-3]):[0-5]\d$/.test(t);
+    const problems=[];
+    if(visitor==='invalid') problems.push('неизвестный посетитель');
+    if(op==='invalid') problems.push('неизвестная операция');
+    if(!validTime(v.time||'')) problems.push('неверное время');
+    const {_deleting,_sending,...persisted}=v;
+    return {...persisted,n:i+1,visitor,operation:op,
+      time:validTime(v.time||'')?v.time:'',timeAuto:validTime(v.timeAuto||'')?v.timeAuto:'',
+      comment:String(v.comment||'').slice(0,2000),
+      orders:Array.isArray(v.orders)?v.orders.filter(o=>o&&typeof o==='object').slice(0,100).map(o=>({
+        ...o,id:String(o.id||'').slice(0,200),client:String(o.client||'').slice(0,500),
+        delivery:String(o.delivery||'').slice(0,200),operation:['issue','return'].includes(o.operation)?o.operation:null
+      })):[],
+      syncBlocked:problems.length?true:v.syncBlocked===true,
+      syncError:problems.length?`Требует проверки: ${problems.join(', ')}`:(v.syncError||null)};
+  });
+  return {...draft,worker:String(draft.worker),shiftStart:start.toISOString(),visits:cleanVisits};
+}
 
 // Экранирование для вставки в HTML (ID заказов и имена клиентов приходят из таблицы)
 function esc(s){ return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
@@ -643,7 +751,7 @@ async function init(){
     document.getElementById('loadingError').style.display='block';
     const errEl = document.getElementById('loadingErrorDetail');
     const msg = window._lastLoadError ? String(window._lastLoadError) : 'нет данных';
-    errEl.innerHTML = `<div>Ошибка: ${msg}</div><div>WHApi: ${typeof window.WHApi}</div>`;
+    errEl.textContent = `Ошибка: ${msg} · WHApi: ${typeof window.WHApi}`;
     errEl.style.display='block';
     return;
   }
@@ -658,12 +766,12 @@ async function init(){
       personalWorkerUrl = found.name;
       worker = found.name;
       // Ищем черновик: сначала localStorage, затем с сервера
-      const draftRaw = LS.get(draftKey())
-        || (serverDraft ? JSON.stringify(serverDraft) : null);
+      const newestDraft = pickDraftPreservingConflict(LS.get(draftKey()), serverDraft);
+      const draftRaw = newestDraft ? JSON.stringify(newestDraft) : null;
 
       if(draftRaw){
         try{
-          const d = JSON.parse(draftRaw);
+          const d = normalizeDraft(JSON.parse(draftRaw));
           if(d.visits){
             const hoursSince = (Date.now() - new Date(d.savedAt)) / 3600000;
             if(hoursSince < 12){
@@ -673,7 +781,14 @@ async function init(){
             }
             return;
           }
-        }catch(e){ LS.remove(draftKey()); }
+        }catch(e){
+          window._lastLoadError=e;
+          document.getElementById('loadingScr').style.display='block';
+          document.getElementById('loadingSpinner').style.display='none';
+          document.getElementById('loadingError').style.display='block';
+          document.getElementById('loadingErrorDetail').textContent=e.message||String(e);
+          return;
+        }
       }
       // Нет черновика → welcome
       showWelcomeScreen(found);
@@ -698,7 +813,7 @@ function showWelcomeScreen(workerObj){
 }
 
 function welcomeStartShift(){
-  startShift();
+  return startShift();
 }
 
 function enterViewOnly(){
@@ -714,7 +829,7 @@ function enterViewOnly(){
   banner.style.display='flex';
   document.getElementById('stab-add').style.display='none';
   document.getElementById('stab-shift').style.display='none';
-  document.getElementById('shiftWho').innerHTML=(worker||'Склад')+`<span>· просмотр</span>`;
+  document.getElementById('shiftWho').innerHTML=esc(worker||'Склад')+`<span>· просмотр</span>`;
   showScreen('s-shift');
   switchShiftTab('orders');
   startOrdersRefresh();
@@ -741,10 +856,9 @@ function viewOrdersAfterShift(){
 
 // Кнопка «Начать смену →» из баннера просмотра
 function startShiftFromViewOnly(){
-  exitViewOnly();
   // Если пришли с персональной ссылки — сразу начинаем смену
   if(worker){
-    startShift();
+    return startShift();
   } else {
     showScreen('s-worker');
   }
@@ -756,6 +870,11 @@ function mskHour(){ return mskNow().getUTCHours(); }
 function isNight(){ const h=mskHour(); return h>=NIGHT_START||h<NIGHT_END; }
 // Определяет день/ночь по конкретному моменту (например, начало смены)
 function isNightAt(date){ const h=(date.getUTCHours()+MSK_OFFSET)%24; return h>=NIGHT_START||h<NIGHT_END; }
+function shiftDateISO(){
+  const d=shiftStart||new Date();
+  return new Date(d.getTime()+MSK_OFFSET*3600000).toISOString().slice(0,10);
+}
+function shiftDateDisplay(){ const [y,m,d]=shiftDateISO().split('-'); return `${d}.${m}.${y}`; }
 // Считает дневные и ночные часы смены (ночь 22:00–09:00 МСК)
 function calcShiftHours(startISO, endISO){
   if(!startISO||!endISO) return {total:0,night:0,day:0};
@@ -861,24 +980,163 @@ async function loadData(workerParam){
 }
 
 // ── DRAFT ──
-function saveDraft(){
-  if(!worker) return;
-  const draft={worker,shiftStart:shiftStart?.toISOString()||null,visits,isNight:isNight()?'Ночь':'День',savedAt:new Date().toISOString()};
-  LS.set(draftKey(),JSON.stringify(draft));
-  WHApi.saveDraft({...draft,isDraft:true,shiftDate:new Date().toLocaleDateString('ru'),totalEntries:visits.length,entries:visits}).catch(()=>{});
+function buildDraftBundle(){
+  if(!worker||!shiftStart) return null;
+  const visitSnapshot=visits.map(v=>{
+    const {_deleting,_sending,...persisted}=v;
+    return JSON.parse(JSON.stringify(persisted));
+  });
+  const draft={worker,shiftStart:shiftStart.toISOString(),clientShiftId,visits:visitSnapshot,isNight:isNightAt(shiftStart)?'Ночь':'День',savedAt:new Date().toISOString()};
+  const payload={...draft,isDraft:true,shiftDate:shiftDateISO(),totalEntries:visitSnapshot.length,entries:visitSnapshot};
+  return {draft,payload};
 }
+function draftConflictKey(){return worker?'wh_draft_conflict_'+worker.replace(/\s+/g,'_'):'wh_draft_conflict';}
+function renderDraftConflict(){
+  if(!draftConflict)return;
+  const banner=document.getElementById('draftConflictBanner');
+  const title=document.getElementById('draftConflictTitle');
+  const text=document.getElementById('draftConflictText');
+  const button=document.getElementById('draftConflictButton');
+  const localCount=draftConflict.localDraft?.visits?.length||0;
+  if(title) title.textContent=draftConflict.closed
+    ? '⚠️ Смена закрыта на другом устройстве'
+    : '⚠️ На другом устройстве уже открыта смена';
+  if(text) text.textContent=`${draftConflict.message}. Локальные визиты (${localCount}) сохранены и не потеряны.`;
+  if(button) button.textContent=draftConflict.closed
+    ? 'Проверить закрытую смену'
+    : 'Перенести мои визиты в открытую смену';
+  if(banner) banner.classList.add('show');
+}
+function setDraftConflict(serverDraft,message,localDraft,closed=false){
+  const local=localDraft||buildDraftBundle()?.draft;
+  if((!serverDraft&&!closed)||!local) return false;
+  draftConflict={serverDraft:serverDraft||null,localDraft:local,
+    message:message||'На сервере есть другая незакрытая смена',closed:closed===true};
+  LS.set(draftConflictKey(),JSON.stringify(draftConflict));
+  LS.set(draftKey(),JSON.stringify(serverDraft||local));
+  stopAutosave();
+  renderDraftConflict();
+  checkReady();renderTable();
+  return true;
+}
+function pickDraftPreservingConflict(localRaw,serverDraft){
+  let local=null;
+  try{local=localRaw?normalizeDraft(JSON.parse(localRaw)):null;}catch(e){}
+  let server=null;
+  try{server=serverDraft?normalizeDraft(serverDraft):null;}catch(e){server=serverDraft||null;}
+  if(local&&server&&!sameDraftShift(local,server)){
+    setDraftConflict(server,'Найдены две разные незакрытые смены',local);
+    return server;
+  }
+  return pickNewestDraft(local?JSON.stringify(local):localRaw,server);
+}
+function restoreStoredDraftConflict(){
+  try{
+    const saved=JSON.parse(LS.get(draftConflictKey())||'null');
+    if(saved?.localDraft&&saved.localDraft.worker===worker&&(saved.serverDraft||saved.closed)){
+      draftConflict=saved;
+      renderDraftConflict();
+      stopAutosave();checkReady();renderTable();
+    }
+  }catch(e){LS.remove(draftConflictKey());}
+}
+function shiftMutationBlocked(){
+  if(openingShift){showToast('Дождитесь подтверждения открытия смены');return true;}
+  if(draftConflict){showToast(draftConflict.closed
+    ? 'Эта смена уже закрыта — проверьте красное уведомление'
+    : 'Сначала объедините смены в красном уведомлении','#E74C3C');return true;}
+  return false;
+}
+async function resolveDraftConflict(){
+  if(!draftConflict)return;
+  const saved=draftConflict;
+  try{
+    const snapshot=await WHApi.getData(worker);
+    if(!snapshot?.draft){
+      if(!saved.closed)throw new Error('Активная смена уже закрыта — обновите страницу');
+      const local=normalizeDraft(saved.localDraft);
+      const acks=readVisitAcks();
+      const unconfirmed=local.visits.filter(v=>!v.visitId&&!acks[v.clientEventId]?.visitId);
+      if(unconfirmed.length)throw new Error(`В закрытой смене осталось ${unconfirmed.length} неподтверждённых визитов — нужна ручная сверка менеджера`);
+      local.visits.forEach(v=>v.clientEventId&&removePendingVisit(v.clientEventId));
+      draftConflict=null;LS.remove(draftConflictKey());LS.remove(draftKey());
+      document.getElementById('draftConflictBanner')?.classList.remove('show');
+      visits=[];shiftStart=null;clientShiftId=null;pendingOrders=[];
+      stopAutosave();stopOrdersRefresh();enterViewOnly();renderPendingOrders();
+      showToast('✓ Закрытая смена подтверждена, включён режим просмотра','var(--client)');
+      return;
+    }
+    const active=ensureDraftVisitClientIds(normalizeDraft(snapshot.draft));
+    const local=ensureDraftVisitClientIds(normalizeDraft(saved.localDraft));
+    const acks=readVisitAcks();
+    const transferable=local.visits.filter(v=>!v.visitId&&!acks[v.clientEventId]?.visitId);
+    const localIds=new Set(transferable.map(v=>v.clientEventId).filter(Boolean));
+    visits=mergeDraftVisits(active.visits,transferable).map(v=>{
+      if(localIds.has(v.clientEventId)&&/active shift|незакрыт|другая смена/i.test(v.syncError||'')){
+        return {...v,syncBlocked:false,syncError:null};
+      }
+      return v;
+    });
+    shiftStart=new Date(active.shiftStart);clientShiftId=active.clientShiftId||newClientId('shift');
+    ensureVisitClientIds();
+    local.visits.forEach(v=>v.clientEventId&&removePendingVisit(v.clientEventId));
+    draftConflict=null;LS.remove(draftConflictKey());
+    document.getElementById('draftConflictBanner')?.classList.remove('show');
+    const result=await saveDraft();
+    if(result?.ok===false)throw result.error||new Error('не удалось сохранить объединённую смену');
+    if(result?.draft){
+      const accepted=normalizeDraft(result.draft);
+      visits=accepted.visits;shiftStart=new Date(accepted.shiftStart);
+      clientShiftId=accepted.clientShiftId||clientShiftId;
+    }
+    ensureVisitClientIds();applyStoredVisitAcks();
+    renderTable();updateOrdersBar();renderOrderCards();populateOrders();
+    enqueueRestoredVisits();startAutosave();startOrdersRefresh();
+    showToast('✓ Смены объединены, визиты отправляются','var(--client)');
+  }catch(e){
+    if(!draftConflict){draftConflict=saved;document.getElementById('draftConflictBanner')?.classList.add('show');}
+    showToast(`⚠️ Не удалось объединить смены: ${e.message||e}`,'#E74C3C');
+  }
+}
+function saveDraft(){
+  if(draftConflict) return Promise.resolve({ok:false,conflict:true});
+  const bundle=buildDraftBundle();
+  if(!bundle) return Promise.resolve();
+  const {draft,payload}=bundle;
+  if(!LS.set(draftKey(),JSON.stringify(draft))) showToast('⚠️ Локальная копия недоступна — сохраняю на сервере','#E74C3C');
+  draftSaveChain=draftSaveChain.catch(()=>{}).then(()=>WHApi.saveDraft(payload)).then(result=>{
+    if(result?.ignored){
+      const closed=result.reason==='shift is already closed';
+      const e=new Error(closed
+        ? 'Эта смена уже закрыта на другом устройстве'
+        : 'На сервере есть другая незакрытая смена');
+      e.retryable=false;e.serverDraft=result.draft||null;e.closed=closed;throw e;
+    }
+    return result;
+  }).catch(e=>{
+    if(e.serverDraft||e.closed) setDraftConflict(e.serverDraft,e.message,draft,e.closed);
+    showToast(`⚠️ Черновик не сохранён: ${e.message||e}`,'#E74C3C');
+    return {ok:false,error:e};
+  });
+  return draftSaveChain;
+}
+async function waitForDraftSaves(){ await draftSaveChain.catch(()=>{}); }
 function startAutosave(){ stopAutosave(); autosaveTimer=setInterval(saveDraft,AUTOSAVE_INT); }
 function stopAutosave(){ if(autosaveTimer){clearInterval(autosaveTimer);autosaveTimer=null;} }
 
 // Проверяет черновик из localStorage ИЛИ с сервера (serverDraft)
 function checkForDraft(serverDraft){
-  const raw = LS.get(draftKey()) || (serverDraft ? JSON.stringify(serverDraft) : null);
+  const el=document.getElementById('restoreBanner');
+  // Активный серверный draft — это блокировка параллельной смены. С общего
+  // экрана его нельзя стирать: нужно восстановить и закрыть штатно.
+  el.dataset.serverProtected=serverDraft?'1':'0';
+  const newestDraft=pickDraftPreservingConflict(LS.get(draftKey()),serverDraft);
+  const raw = newestDraft?JSON.stringify(newestDraft):null;
   if(!raw) return false;
   try{
-    const d=JSON.parse(raw);
-    if(!d.worker||!d.visits?.length) return false;
+    const d=normalizeDraft(JSON.parse(raw));
+    if(!d.worker||!Array.isArray(d.visits)) return false;
     const hrs=Math.round((Date.now()-new Date(d.savedAt))/360000)/10;
-    const el=document.getElementById('restoreBanner');
     document.getElementById('restoreInfo').textContent=`${d.visits.length} ${pl(d.visits.length,'визит','визита','визитов')} · ${hrs} ч. назад`;
     el.classList.add('show'); el.dataset.draft=raw;
     return true;
@@ -887,11 +1145,13 @@ function checkForDraft(serverDraft){
 function restoreShift(){
   const raw=document.getElementById('restoreBanner').dataset.draft;
   if(!raw) return;
-  const draft=JSON.parse(raw);
+  const draft=normalizeDraft(JSON.parse(raw));
   worker=draft.worker; visits=draft.visits||[];
   shiftStart=draft.shiftStart?new Date(draft.shiftStart):new Date();
+  clientShiftId=draft.clientShiftId||newClientId('shift');
+  ensureVisitClientIds(); applyStoredVisitAcks();
   document.getElementById('restoreBanner').classList.remove('show');
-  document.getElementById('shiftWho').innerHTML=worker+`<span>· восстановлено</span>`;
+  document.getElementById('shiftWho').innerHTML=esc(worker)+`<span>· восстановлено</span>`;
   updateShiftInfoCard();
   showScreen('s-shift');
   switchShiftTab('add');
@@ -899,16 +1159,70 @@ function restoreShift(){
   setVisitor('client',document.querySelector('.vbtn.c'));
   document.getElementById('timeInp').value=nowTime();
   renderTable(); updateOrdersBar(); renderOrderCards();
-  startAutosave();
+  enqueueRestoredVisits();
+  restoreStoredDraftConflict();
+  if(!draftConflict)startAutosave();
 }
-function discardDraft(){ LS.remove(draftKey()); document.getElementById('restoreBanner').classList.remove('show'); }
+async function discardDraft(){
+  if(draftConflict){
+    showToast('Нельзя удалить смену другого устройства — сначала восстановите её и разберите красное уведомление','#E74C3C');
+    return;
+  }
+  if(document.getElementById('restoreBanner').dataset.serverProtected==='1'){
+    showToast('Активную серверную смену нельзя удалить — восстановите и закройте её штатно','#E74C3C');
+    return;
+  }
+  await waitForDraftSaves();
+  let target=null;
+  try{
+    const raw=document.getElementById('restoreBanner').dataset.draft;
+    target=normalizeDraft(JSON.parse(raw));
+  }catch(e){showToast(`⚠️ Черновик повреждён: ${e.message||e}`,'#E74C3C');return;}
+  let result;
+  try{ result=await WHApi.clearDraft({worker:target.worker,clientShiftId:target.clientShiftId||null,shiftStart:target.shiftStart}); }
+  catch(e){ showToast(`⚠️ Не удалось удалить черновик: ${e.message||e}`,'#E74C3C'); return; }
+  if(result?.stale){
+    try{
+      const fresh=await WHApi.getData(target.worker);
+      if(fresh.draft){
+        const normalized=normalizeDraft(fresh.draft);
+        const raw=JSON.stringify(normalized);
+        LS.set(draftKey(),raw);
+        const banner=document.getElementById('restoreBanner');
+        banner.dataset.draft=raw;
+        banner.dataset.serverProtected='1';
+        banner.classList.add('show');
+        document.getElementById('restoreInfo').textContent=`${normalized.visits.length} ${pl(normalized.visits.length,'визит','визита','визитов')} · более новая смена`;
+        document.getElementById('startBtn').disabled=true;
+        showToast('⚠️ Найдена более новая смена — сначала откройте её','#E74C3C');
+        return;
+      }
+      LS.remove(draftKey());
+      document.getElementById('restoreBanner').dataset.serverProtected='0';
+      document.getElementById('restoreBanner').classList.remove('show');
+      document.getElementById('startBtn').disabled=false;
+      return;
+    }catch(e){
+      document.getElementById('startBtn').disabled=true;
+      showToast('⚠️ Не удалось проверить актуальную смену','#E74C3C');
+      return;
+    }
+  }
+  LS.remove(draftKey());
+  document.getElementById('restoreBanner').dataset.serverProtected='0';
+  document.getElementById('restoreBanner').classList.remove('show');
+  document.getElementById('startBtn').disabled=false;
+}
 
 // ── RESTORE DIRECT (без баннера, для персональной ссылки) ──
 function restoreShiftDirect(draft){
+  draft=normalizeDraft(draft);
   visits=draft.visits||[];
   shiftStart=draft.shiftStart?new Date(draft.shiftStart):new Date();
+  clientShiftId=draft.clientShiftId||newClientId('shift');
+  ensureVisitClientIds(); applyStoredVisitAcks();
   LS.set(draftKey(), JSON.stringify(draft));
-  document.getElementById('shiftWho').innerHTML=worker+`<span>· восстановлено</span>`;
+  document.getElementById('shiftWho').innerHTML=esc(worker)+`<span>· восстановлено</span>`;
   updateShiftInfoCard();
   showScreen('s-shift');
   switchShiftTab('add');
@@ -916,7 +1230,10 @@ function restoreShiftDirect(draft){
   setVisitor('client',document.querySelector('.vbtn.c'));
   document.getElementById('timeInp').value=nowTime();
   renderTable(); updateOrdersBar(); renderOrderCards();
-  startAutosave(); startOrdersRefresh();
+  enqueueRestoredVisits();
+  restoreStoredDraftConflict();
+  if(!draftConflict)startAutosave();
+  startOrdersRefresh();
 }
 
 // ── OLD SHIFT SCREEN (смена > 12ч) ──
@@ -950,25 +1267,96 @@ function renderWorkers(){
   document.getElementById('wgrid').innerHTML=workers.map((w,i)=>`
     <button class="wbtn" onclick="selWorker('${jsq(w.name)}',this)">
       <div class="wava">${ICONS[i%ICONS.length]}</div>
-      <div class="wname">${w.name}</div>
+      <div class="wname">${esc(w.name)}</div>
       <div class="wchk">✓</div>
     </button>`).join('');
 }
-function selWorker(name,el){
+async function selWorker(name,el){
   document.querySelectorAll('.wbtn').forEach(b=>b.classList.remove('sel'));
-  el.classList.add('sel'); worker=name;
-  document.getElementById('startBtn').disabled=false;
+  el.classList.add('sel');
+  // Конфликт хранится отдельно для каждого кладовщика. При переключении не
+  // переносим чужое состояние в новую смену и не удаляем его из localStorage.
+  draftConflict=null;document.getElementById('draftConflictBanner')?.classList.remove('show');
+  worker=name;
+  const startBtn=document.getElementById('startBtn'); startBtn.disabled=true;
+  document.getElementById('restoreBanner').classList.remove('show');
+  try{
+    const j=await WHApi.getData(name);
+    if(worker!==name) return;
+    orders=j.orders||[];
+    serverIssuedToday=new Set(j.processedOrders?.issued||[]);
+    serverReturnedToday=new Set(j.processedOrders?.returned||[]);
+    serverIssuedBy=j.processedOrders?.issuedBy||{};
+    serverReturnedBy=j.processedOrders?.returnedBy||{};
+    serverOtherVisits=j.processedOrders?.otherVisits||[];
+    populateOrders(); updateOrdersBar();
+    startBtn.disabled=checkForDraft(j.draft||null);
+  }catch(e){
+    showToast(`⚠️ Не удалось проверить смену: ${e.message||e}`,'#E74C3C');
+  }
   // Если уже авторизован на этом устройстве — не спрашиваем PIN повторно
   // PIN спросим только при первом нажатии Start
 }
-function startShift(){
+async function startShift(){
+  if(openingShift) return;
+  if(draftConflict){shiftMutationBlocked();return;}
+  if(document.getElementById('restoreBanner').classList.contains('show')){
+    showToast('Сначала восстановите или удалите незакрытую смену'); return;
+  }
   // PIN ОТКЛЮЧЁН
   // if(worker && localStorage.getItem(authKey(worker))!=='1'){
   //   const workerObj = workers.find(w=>w.name===worker);
   //   if(workerObj){ showPinScreen(workerObj); return; }
   // }
+  // После закрытой смены экран просмотра ещё держит старый массив visits.
+  // Новая смена всегда начинается с чистого локального состояния.
+  openingShift=true;
+  const startBtn=document.getElementById('startBtn');
+  if(startBtn) startBtn.disabled=true;
+  await waitForDraftSaves();
+  visits=[]; visitor=null; operation=null; pendingOrders=[]; hasOther=false; closingShift=false;
+  deletingEvents.clear(); cancelledEvents.clear();
   shiftStart=new Date();
-  document.getElementById('shiftWho').innerHTML=worker+`<span>· ${nowTime()} МСК</span>`;
+  clientShiftId=newClientId('shift');
+  const bundle=buildDraftBundle();
+  try{
+    const result=await WHApi.saveDraft(bundle.payload);
+    if(result?.ignored){
+      if(result.draft){
+        const existing=normalizeDraft(result.draft);
+        LS.set(draftKey(),JSON.stringify(existing));
+        showToast('Открываю уже начатую смену','var(--yandex)');
+        if(viewOnlyMode)exitViewOnly();
+        const age=(Date.now()-new Date(existing.savedAt||existing.shiftStart).getTime())/3600000;
+        if(age>12) showOldShiftScreen(existing); else restoreShiftDirect(existing);
+      }else{
+        shiftStart=null;clientShiftId=null;
+        showToast('⚠️ Эта смена уже закрыта на другом устройстве','#E74C3C');
+        if(startBtn) startBtn.disabled=false;
+      }
+      return;
+    }
+    const accepted=result?.draft?normalizeDraft(result.draft):bundle.draft;
+    visits=accepted.visits||[];
+    shiftStart=new Date(accepted.shiftStart);
+    clientShiftId=accepted.clientShiftId||clientShiftId;
+    LS.set(draftKey(),JSON.stringify(accepted));
+  }catch(e){
+    if(e?.retryable===false){
+      shiftStart=null;clientShiftId=null;
+      showToast(`⚠️ Смена не открыта: ${e.message||e}`,'#E74C3C');
+      if(startBtn) startBtn.disabled=false;
+      return;
+    }
+    // Оффлайн-режим остаётся доступен. Первая успешная запись на сервере
+    // всё равно пройдёт проверку активного draft-reservation.
+    LS.set(draftKey(),JSON.stringify(bundle.draft));
+    showToast('⚠️ Смена открыта офлайн — синхронизация продолжится автоматически','var(--yandex)');
+  }finally{
+    openingShift=false;
+  }
+  if(viewOnlyMode)exitViewOnly();
+  document.getElementById('shiftWho').innerHTML=esc(worker)+`<span>· ${nowTime()} МСК</span>`;
   updateShiftInfoCard();
   showScreen('s-shift');
   switchShiftTab('add');
@@ -977,7 +1365,6 @@ function startShift(){
   document.getElementById('timeInp').value=nowTime();
   updateDateLabel();
   refreshOrdersFromServer().then(()=>{ updateOrdersBar(); renderOrderCards(); });
-  saveDraft();
   startAutosave();
   startOrdersRefresh();
 }
@@ -995,6 +1382,8 @@ function updateShiftInfoCard(){
 
 // ── SHIFT TABS ──
 function switchShiftTab(tab){
+  if(openingShift){showToast('Дождитесь подтверждения открытия смены');return;}
+  if(closingShift&&tab==='add'){showToast('Дождитесь завершения закрытия смены');return;}
   currentShiftTab=tab;
   document.querySelectorAll('.stab').forEach(t=>t.classList.remove('active'));
   document.getElementById('stab-'+tab).classList.add('active');
@@ -1056,9 +1445,9 @@ function tapRow(o, badgeCls, locked, forceType){
     const ovDate = parts.length===3 ? new Date(`${parts[2]}-${parts[1]}-${parts[0]}`) : null;
     const days = ovDate ? Math.floor((Date.now()-ovDate)/86400000) : 0;
     const label = isIssueOv ? 'выдача' : 'возврат';
-    overdueHint=`<div style="font-size:10px;color:#c0392b;margin-top:1px">📅 ${label} ${dateStr||''}${days>0?` · просрочен ${days} дн.`:''}</div>`;
+    overdueHint=`<div style="font-size:10px;color:#c0392b;margin-top:1px">📅 ${label} ${esc(dateStr||'')}${days>0?` · просрочен ${days} дн.`:''}</div>`;
   }
-  return `<div class="otap" id="${rowId}" ${clickAttr}>
+  return `<div class="otap" id="${esc(rowId)}" ${clickAttr}>
     <div class="otap-left">
       <div class="otap-id">${esc(o.id)}${hint}</div>
       <div class="otap-client">${esc(o.client||'')}</div>
@@ -1066,7 +1455,7 @@ function tapRow(o, badgeCls, locked, forceType){
     </div>
     <div style="display:flex;align-items:center;gap:7px">
       <span class="otap-badge ${badgeCls}">${label}</span>
-      <div class="otap-check" id="${chkId}"></div>
+      <div class="otap-check" id="${esc(chkId)}"></div>
     </div>
   </div>`;
 }
@@ -1086,6 +1475,8 @@ document.addEventListener('click', e => {
 }, true);
 
 function tapOrder(id, forceType){
+  if(openingShift||draftConflict){shiftMutationBlocked();return;}
+  if(closingShift){showToast('Дождитесь завершения закрытия смены');return;}
   const already=pendingOrders.find(o=>o.id===id);
   if(already){
     // deselect
@@ -1096,6 +1487,7 @@ function tapOrder(id, forceType){
   if(id==='__other__'){
     order={id:'__other__',client:'нет в списке',type:null};
     hasOther=true;
+    operation=null;
   } else {
     const found=orders.find(o=>o.id===id);
     // Для sameDay: берём эффективный тип из текущей сессии, а не статичный o.type
@@ -1131,27 +1523,14 @@ function updateTapSelections(){
 
 // ── AUTO-REFRESH ORDERS from server every 60s ──
 let ordersRefreshTimer=null;
+let lastRefreshErrorAt=0;
 function startOrdersRefresh(){
   stopOrdersRefresh();
   ordersRefreshTimer=setInterval(refreshOrdersFromServer, 15000);
 }
 function stopOrdersRefresh(){ if(ordersRefreshTimer){clearInterval(ordersRefreshTimer);ordersRefreshTimer=null;} }
 
-// Недавно удалённые визиты: сервер обрабатывает deleteVisit асинхронно (no-cors),
-// и ближайший refresh мог вернуть заказ обратно («мигание»). Помним удалённое 90 сек.
-let recentlyDeletedOrders=new Map(); // orderId → ts удаления
-let recentlyDeletedOther =new Map(); // time визита «не из списка» → ts удаления
-function applyRecentDeletions(){
-  const cutoff=Date.now()-90000;
-  recentlyDeletedOrders.forEach((ts,id)=>{
-    if(ts<cutoff){ recentlyDeletedOrders.delete(id); return; }
-    serverIssuedToday.delete(id); serverReturnedToday.delete(id);
-  });
-  recentlyDeletedOther.forEach((ts,t)=>{
-    if(ts<cutoff){ recentlyDeletedOther.delete(t); return; }
-    serverOtherVisits=serverOtherVisits.filter(v=>v.time!==t);
-  });
-}
+function otherVisitKey(v){ return v.visitId||v.id||v.clientEventId||`${v.date||''}|${v.time||''}|${v.worker||''}`; }
 
 async function refreshOrdersFromServer(){
   try{
@@ -1160,14 +1539,20 @@ async function refreshOrdersFromServer(){
       orders=j.orders;
       serverIssuedToday   = new Set(j.processedOrders?.issued   || []);
       serverReturnedToday = new Set(j.processedOrders?.returned || []);
+      serverIssuedBy   = j.processedOrders?.issuedBy   || {};
+      serverReturnedBy = j.processedOrders?.returnedBy || {};
       serverOtherVisits = j.processedOrders?.otherVisits || [];
-      applyRecentDeletions();
       populateOrders();
       updateOrdersBar();
       renderOrderCards();
     }
     flushPendingVisits(); // сеть точно есть — дошлём то, что копилось оффлайн
-  }catch(e){ /* silent fail */ }
+  }catch(e){
+    if(Date.now()-lastRefreshErrorAt>60000){
+      lastRefreshErrorAt=Date.now();
+      showToast(`⚠️ Не удалось обновить заказы: ${e.message||e}`,'#E74C3C');
+    }
+  }
 }
 
 // Возвращает эффективный тип заказа с учётом однодневной аренды:
@@ -1193,19 +1578,14 @@ function getSessionStatuses(){
   const returnedIds = new Set(serverReturnedToday);
   const issuedBy    = {...serverIssuedBy};
   const returnedBy  = {...serverReturnedBy};
-  // Добавляем из текущей сессии («both» = выдача И возврат, как на сервере)
+  // Для смешанного визита операция берётся из каждого заказа.
   visits.forEach(v=>{
+    if(v.syncBlocked) return;
     (v.orders||[]).forEach(o=>{
       if(!o.id||o.id==='__other__') return;
-      if(v.operation==='both'){
-        // Смешанный визит: используем тип конкретного заказа
-        const oType = o.type || 'issue';
-        if(['issue','pickup'].includes(oType))  { issuedIds.add(o.id);   issuedBy[o.id]   = worker; }
-        if(['return','dropoff'].includes(oType)){ returnedIds.add(o.id); returnedBy[o.id] = worker; }
-      } else {
-        if(['issue','pickup','both'].includes(v.operation))   { issuedIds.add(o.id);   issuedBy[o.id]   = worker; }
-        if(['return','dropoff','both'].includes(v.operation)) { returnedIds.add(o.id); returnedBy[o.id] = worker; }
-      }
+      const oType=o.operation||o.type||v.operation;
+      if(['issue','pickup'].includes(oType))  { issuedIds.add(o.id);   issuedBy[o.id]   = worker; }
+      if(['return','dropoff'].includes(oType)){ returnedIds.add(o.id); returnedBy[o.id] = worker; }
     });
   });
   return {issuedIds, returnedIds, issuedBy, returnedBy};
@@ -1222,12 +1602,13 @@ function onOrderChange(){
 
   if(id==='__other__'){
     info.classList.remove('show'); aoBtn.disabled=false;
+    operation=null;
     opSec.classList.add('show');
     renderOps();
     checkReady(); return;
   }
 
-  opSec.classList.remove('show'); // Hide op buttons for list orders
+  opSec.classList.toggle('show',hasOther);
   const o=orders.find(x=>x.id===id);
   if(o){
     document.getElementById('oi-client').textContent=o.client||'—';
@@ -1235,7 +1616,7 @@ function onOrderChange(){
     document.getElementById('oi-delivery').textContent=o.delivery||'—';
     info.classList.add('show');
     // Auto-set operation from order type (sameDay: эффективный тип из сессии)
-    if(visitor){
+    if(visitor&&!hasOther){
       let effT=o.type;
       if(o.sameDay){const {issuedIds,returnedIds}=getSessionStatuses();const e=getEffectiveOrderType(o,issuedIds,returnedIds);effT=e==='done'?'return':e;}
       const tOp=effT==='issue'?'issue':'return';
@@ -1251,6 +1632,7 @@ function onOrderChange(){
 }
 
 function addOrderToVisit(){
+  if(closingShift) return;
   const sel = document.getElementById('orderSel');
   const id  = sel.value;
   if(!id) return;
@@ -1260,6 +1642,7 @@ function addOrderToVisit(){
   if(id === '__other__'){
     order = {id:'__other__', client:'нет в списке', type:null};
     hasOther = true;
+    operation = null;
   } else {
     // Find full order object from loaded orders list
     const found = orders.find(o => o.id === id);
@@ -1286,9 +1669,14 @@ function addOrderToVisit(){
 }
 
 function removeOrderFromPending(id){
+  if(closingShift||shiftMutationBlocked()) return;
   pendingOrders=pendingOrders.filter(o=>o.id!==id);
   hasOther=pendingOrders.some(o=>o.id==='__other__');
-  if(!hasOther){ document.getElementById('opSection').classList.remove('show'); if(operation&&OPS[visitor]?.find(op=>op.id===operation)===undefined)operation=null; }
+  if(!hasOther){
+    document.getElementById('opSection').classList.remove('show');
+    const first=pendingOrders.find(o=>o.id&&o.id!=='__other__');
+    operation=first?.type==='return'?'return':first?.type==='issue'?'issue':null;
+  }
   renderPendingOrders(); updateTapSelections(); checkReady();
 }
 
@@ -1305,19 +1693,20 @@ function renderPendingOrders(){
 
 // ── VISITOR / OP ──
 function setVisitor(v,el){
+  if(closingShift||shiftMutationBlocked()) return;
   visitor=v; operation=null;
   document.querySelectorAll('.vbtn').forEach(b=>b.classList.remove('act'));
   el.classList.add('act');
   if(hasOther){ renderOps(); document.getElementById('opSection').classList.add('show'); }
   const firstOrder=pendingOrders.find(o=>o.id&&o.id!=='__other__');
-  if(firstOrder&&firstOrder.type){ const tOp=firstOrder.type==='issue'?'issue':'return'; const valid=OPS[v]||[]; if(valid.find(op=>op.id===tOp)){operation=tOp;document.querySelectorAll('.opb').forEach(b=>{b.classList.remove('act','auto');if(b.dataset.op===tOp)b.classList.add('auto');});} }
+  if(!hasOther&&firstOrder&&firstOrder.type){ const tOp=firstOrder.type==='issue'?'issue':'return'; const valid=OPS[v]||[]; if(valid.find(op=>op.id===tOp)){operation=tOp;document.querySelectorAll('.opb').forEach(b=>{b.classList.remove('act','auto');if(b.dataset.op===tOp)b.classList.add('auto');});} }
   checkReady();
 }
 function renderOps(){
   document.getElementById('opGroup').innerHTML=(OPS[visitor]||[]).map(op=>
     `<button class="opb" data-op="${op.id}" onclick="setOp('${op.id}',this)">${op.label}</button>`).join('');
 }
-function setOp(op,el){ operation=op; document.querySelectorAll('.opb').forEach(b=>b.classList.remove('act','auto')); el.classList.add('act'); checkReady(); }
+function setOp(op,el){ if(closingShift||shiftMutationBlocked())return; operation=op; document.querySelectorAll('.opb').forEach(b=>b.classList.remove('act','auto')); el.classList.add('act'); checkReady(); }
 
 // Determine effective operation: derive from order types, no manual selection needed for list orders
 function getEffectiveOperation(){
@@ -1332,8 +1721,8 @@ function getEffectiveOperation(){
   // Count issue vs return types among list orders (sameDay: берём эффективный тип из сессии)
   const {issuedIds:_iids,returnedIds:_rids}=getSessionStatuses();
   function _effType(o){ return o.sameDay?getEffectiveOrderType(o,_iids,_rids):o.type; }
-  const issueCount  = listOrders.filter(o => _effType(o) === 'issue').length;
-  const returnCount = listOrders.filter(o => _effType(o) === 'return').length;
+  const issueCount  = listOrders.filter(o => _effType(o) === 'issue').length + (hasOtherOrder&&operation==='issue'?1:0);
+  const returnCount = listOrders.filter(o => _effType(o) === 'return').length + (hasOtherOrder&&operation==='return'?1:0);
 
   if (issueCount > 0 && returnCount === 0) return 'issue';
   if (returnCount > 0 && issueCount === 0) return 'return';
@@ -1346,12 +1735,14 @@ function checkReady(){
   const hasSelected = pendingOrders.length > 0 || (selectedInDropdown && selectedInDropdown !== '');
   // If "other" is selected/in list — also need manual operation
   const needsOp = hasOther || selectedInDropdown === '__other__';
-  const ready = visitor && hasSelected && (!needsOp || operation);
+  const ready = !closingShift && !openingShift && !draftConflict && visitor && hasSelected && (!needsOp || operation);
   document.getElementById('addBtn').disabled = !ready;
 }
 
 // ── ADD VISIT ──
 function addVisit(){
+  if(openingShift||draftConflict){shiftMutationBlocked();return;}
+  if(closingShift){showToast('Дождитесь завершения закрытия смены');return;}
   // Auto-add order from dropdown if it wasn't added via ＋ button
   const selId = document.getElementById('orderSel').value;
   if(selId && !pendingOrders.find(o=>o.id===selId)){
@@ -1369,9 +1760,13 @@ function addVisit(){
   const visitNight=isNaN(hVal)?isNight():(hVal>=NIGHT_START||hVal<NIGHT_END);
 
   const visit={
+    clientEventId:newClientId('visit'),
     n:visits.length+1,
     visitor, operation:op,
-    orders:pendingOrders.map(o=>({id:o.id,client:o.client||'',returnDate:o.returnDate||'',delivery:o.delivery||'',type:o.type||null})),
+    orders:pendingOrders.map(o=>{
+      const effective=o.id==='__other__' ? operation : (o.sameDay?getEffectiveOrderType(o,getSessionStatuses().issuedIds,getSessionStatuses().returnedIds):o.type);
+      return {id:o.id,client:o.client||'',returnDate:o.returnDate||'',delivery:o.delivery||'',type:effective||o.type||null,operation:effective||op};
+    }),
     // legacy compat
     orderId:pendingOrders[0]?.id||null,
     orderClient:pendingOrders[0]?.client||null,
@@ -1386,7 +1781,7 @@ function addVisit(){
     night:visitNight,
   };
   visits.push(visit);
-  sendVisitNow(visit);
+  sendVisitNow(visit).catch(()=>{});
   pendingOrders=[]; hasOther=false;
   renderPendingOrders();
   operation=null;
@@ -1402,65 +1797,193 @@ function addVisit(){
   renderTable(); updateOrdersBar(); renderOrderCards();
   populateOrders();
   saveDraft();
-  showToast('✓ Визит записан', 'var(--client)');
+  showToast('Визит добавлен · отправляется', 'var(--client)');
 }
 
-// Немедленная отправка визита в Google Sheets (не ждёт закрытия смены)
-function sendVisitNow(visit){
-  const entry={
+function entryFromVisit(visit){
+  return {
     visitor:visit.visitor, operation:visit.operation,
     orders:visit.orders||[], orderId:visit.orderId||'', orderClient:visit.orderClient||'',
     orderReturnDate:visit.orderReturnDate||'', orderDelivery:visit.orderDelivery||'',
     comment:visit.comment||'', date:visit.date||'', time:visit.time, timeAuto:visit.timeAuto,
     timestamp:visit.ts, night:visit.night?'Ночь':'День'
   };
-  const n=mskNow();
-  const mskDate=pad(n.getUTCDate())+'.'+pad(n.getUTCMonth()+1)+'.'+n.getUTCFullYear();
-  postVisitPayload({
+}
+
+function buildVisitPayload(visit){
+  const payload={
+    clientEventId:visit.clientEventId,
+    clientShiftId,
     action:'addVisit',
-    shiftDate:mskDate,
+    shiftDate:shiftDateDisplay(),
     shiftStart:shiftStart?shiftStart.toISOString():new Date().toISOString(),
     shiftEnd:'',
     // День/ночь смены — всегда от её НАЧАЛА (как при закрытии), иначе
     // до закрытия смены в логе «плавающее» значение
     worker, isNight:(shiftStart?isNightAt(shiftStart):isNight())?'Ночь':'День',
     totalEntries:visits.length,
-    entry
-  });
+    entry:entryFromVisit(visit)
+  };
+  if(!payload.clientEventId){
+    payload.clientEventId=legacyClientEventId(payload);
+    visit.clientEventId=payload.clientEventId;
+  }
+  if(visit.syncBlocked&&visit.syncError) payload._blockedError=visit.syncError;
+  return payload;
+}
+
+// Немедленная отправка визита; сервер подтверждает UUID.
+function sendVisitNow(visit){
+  return postVisitPayload(buildVisitPayload(visit), visit);
 }
 
 // ── ОЧЕРЕДЬ НЕОТПРАВЛЕННЫХ ВИЗИТОВ (оффлайн) ──
-// no-cors отправка — fire-and-forget; если сети нет, fetch упадёт и визит
-// раньше молча терялся до закрытия смены. Теперь складываем в очередь и шлём повторно.
+// Запрос ждёт подтверждение сервера. При временной ошибке визит остаётся в
+// очереди с устойчивым clientEventId; постоянная ошибка показывается в строке.
 const PENDING_KEY='wh_pending_visits';
-function postVisitPayload(payload){
-  WHApi.addVisit(payload)
-    .catch(()=>{ queuePendingVisit(payload); });
-}
-function queuePendingVisit(payload){
+const ACK_KEY='wh_visit_acks';
+const sendingEvents=new Map();
+const cancelledEvents=new Set();
+const deletingEvents=new Map();
+let pendingMemory=[];
+
+function readVisitAcks(){
   try{
-    const q=JSON.parse(LS.get(PENDING_KEY)||'[]');
-    q.push(payload);
-    LS.set(PENDING_KEY,JSON.stringify(q));
-    showToast('⚠️ Нет сети — визит будет отправлен позже','var(--yandex)');
-  }catch(e){}
+    const parsed=JSON.parse(LS.get(ACK_KEY)||'{}');
+    if(!parsed||typeof parsed!=='object'||Array.isArray(parsed)) return {};
+    const clean={};
+    Object.entries(parsed).forEach(([eventId,value])=>{
+      if(!eventId||!value||typeof value!=='object'||Array.isArray(value)||typeof value.visitId!=='string'||!value.visitId) return;
+      clean[eventId]={visitId:value.visitId,shiftId:typeof value.shiftId==='string'?value.shiftId:null,
+        at:Number.isFinite(Number(value.at))?Number(value.at):0};
+    });
+    return clean;
+  }catch(e){return{};}
 }
-function flushPendingVisits(){
-  let q=[];
-  try{ q=JSON.parse(LS.get(PENDING_KEY)||'[]'); }catch(e){}
-  if(!q.length) return;
-  // Очищаем очередь только после успешной отправки каждого элемента
-  q.forEach(p=>{
-    WHApi.addVisit(p).then(()=>{
-      try{
-        const cur=JSON.parse(LS.get(PENDING_KEY)||'[]');
-        const idx=cur.findIndex(x=>x.entry&&p.entry&&x.entry.timeAuto===p.entry.timeAuto);
-        if(idx>=0){ cur.splice(idx,1); LS.set(PENDING_KEY,JSON.stringify(cur)); }
-      }catch(e){}
-    }).catch(()=>{}); // не удалось — остаётся в очереди
+function recordVisitAck(payload,result){
+  try{
+    if(!payload.clientEventId||!result?.visitId) return;
+    const acks=readVisitAcks();
+    acks[payload.clientEventId]={visitId:String(result.visitId),shiftId:result.shiftId?String(result.shiftId):null,at:Date.now()};
+    const keys=Object.keys(acks).sort((a,b)=>(acks[b]?.at||0)-(acks[a]?.at||0));
+    keys.slice(200).forEach(k=>delete acks[k]);
+    LS.set(ACK_KEY,JSON.stringify(acks));
+  }catch(e){ /* Серверный успех нельзя превращать в повтор из-за localStorage. */ }
+}
+function applyStoredVisitAcks(){
+  const acks=readVisitAcks();
+  const pending=new Map(readPendingVisits().map(p=>[p.clientEventId,p]));
+  visits.forEach(v=>{
+    const a=acks[v.clientEventId];
+    if(a){v.visitId=a.visitId;v.shiftId=a.shiftId||v.shiftId;v.syncBlocked=false;v.syncError=null;return;}
+    const queued=pending.get(v.clientEventId);
+    if(queued?._blockedError){v.syncBlocked=true;v.syncError=queued._blockedError;}
   });
 }
-window.addEventListener('online',flushPendingVisits);
+function ensureVisitClientIds(){
+  visits.forEach(v=>{
+    if(v.clientEventId) return;
+    const payload={worker,shiftStart:shiftStart?.toISOString()||'',entry:entryFromVisit(v)};
+    v.clientEventId=legacyClientEventId(payload);
+  });
+}
+function ensureDraftVisitClientIds(draft){
+  (draft?.visits||[]).forEach(v=>{
+    if(v.clientEventId) return;
+    v.clientEventId=legacyClientEventId({worker:draft.worker||'',shiftStart:draft.shiftStart||'',entry:entryFromVisit(v)});
+  });
+  return draft;
+}
+function readPendingVisits(){
+  let q=[];
+  try{const parsed=JSON.parse(LS.get(PENDING_KEY)||'[]');q=Array.isArray(parsed)?parsed:[];}catch(e){}
+  const unique=new Map();
+  [...q,...pendingMemory].forEach(payload=>{
+    if(!payload||typeof payload!=='object') return;
+    if(!payload.clientEventId) payload.clientEventId=legacyClientEventId(payload);
+    unique.set(payload.clientEventId,payload);
+  });
+  const normalized=[...unique.values()];
+  pendingMemory=normalized;
+  if(JSON.stringify(normalized)!==JSON.stringify(q)) LS.set(PENDING_KEY,JSON.stringify(normalized));
+  return normalized;
+}
+function postVisitPayload(payload, visit){
+  queuePendingVisit(payload, false);
+  return sendQueuedPayload(payload);
+}
+function queuePendingVisit(payload, notify=true){
+  try{
+    if(!payload.clientEventId) payload.clientEventId=legacyClientEventId(payload);
+    const q=readPendingVisits();
+    const idx=q.findIndex(x=>x.clientEventId===payload.clientEventId);
+    if(idx>=0){
+      const blocked=q[idx]._blockedError;
+      q[idx]={...q[idx],...payload};
+      if(blocked&&!q[idx]._blockedError) q[idx]._blockedError=blocked;
+    }else q.push(payload);
+    pendingMemory=q;
+    LS.set(PENDING_KEY,JSON.stringify(q));
+    if(notify) showToast('⚠️ Визит в очереди и будет отправлен позже','var(--yandex)');
+  }catch(e){}
+}
+function removePendingVisit(eventId){
+  const q=readPendingVisits().filter(x=>x.clientEventId!==eventId);
+  pendingMemory=q;
+  LS.set(PENDING_KEY,JSON.stringify(q));
+}
+function sendQueuedPayload(payload){
+  if(!payload.clientEventId) payload.clientEventId=legacyClientEventId(payload);
+  if(sendingEvents.has(payload.clientEventId)) return sendingEvents.get(payload.clientEventId);
+  if(payload._blockedError){
+    const localVisit=visits.find(v=>v.clientEventId===payload.clientEventId);
+    if(localVisit){localVisit.syncBlocked=true;localVisit.syncError=payload._blockedError;}
+    const blocked=new Error(payload._blockedError); blocked.retryable=false;
+    return Promise.reject(blocked);
+  }
+  const p=WHApi.addVisit(payload).then(r=>{
+    removePendingVisit(payload.clientEventId);
+    recordVisitAck(payload,r);
+    const localVisit=visits.find(v=>v.clientEventId===payload.clientEventId);
+    if(r?.deleted){
+      const idx=visits.findIndex(v=>v.clientEventId===payload.clientEventId);
+      if(idx>=0){visits.splice(idx,1);visits.forEach((v,j)=>v.n=j+1);renderTable();updateOrdersBar();renderOrderCards();populateOrders();saveDraft();}
+    }else if(localVisit&&r?.visitId){
+      localVisit.visitId=r.visitId;localVisit.shiftId=r.shiftId;localVisit.syncBlocked=false;localVisit.syncError=null;saveDraft();
+    }
+    if(!cancelledEvents.has(payload.clientEventId)) showToast('✓ Визит сохранён на сервере','var(--client)');
+    return r;
+  }).catch(e=>{
+    if(!cancelledEvents.has(payload.clientEventId)){
+      if(e?.retryable===false) payload._blockedError=e.message||String(e);
+      queuePendingVisit(payload, false);
+      const localVisit=visits.find(v=>v.clientEventId===payload.clientEventId);
+      if(localVisit){localVisit.syncBlocked=e?.retryable===false;localVisit.syncError=e.message||String(e);renderTable();updateOrdersBar();renderOrderCards();populateOrders();saveDraft();}
+      showToast(`⚠️ Ошибка отправки: ${e.message||e}`,'#E74C3C');
+    }
+    throw e;
+  }).finally(()=>sendingEvents.delete(payload.clientEventId));
+  sendingEvents.set(payload.clientEventId,p);
+  return p;
+}
+function isCurrentShiftPayload(payload){
+  if(!shiftStart||!worker) return false;
+  if(clientShiftId&&payload.clientShiftId) return payload.clientShiftId===clientShiftId;
+  return payload.worker===worker&&payload.shiftStart===shiftStart.toISOString();
+}
+async function flushPendingVisits(currentShiftOnly=false){
+  const q=readPendingVisits().filter(p=>!currentShiftOnly||isCurrentShiftPayload(p));
+  if(!q.length) return true;
+  const results=await Promise.allSettled(q.map(sendQueuedPayload));
+  return results.every(x=>x.status==='fulfilled');
+}
+function enqueueRestoredVisits(){
+  // Проверяем и подтверждённые визиты: tombstone на сервере должен удалить
+  // устаревшую строку из черновика другого устройства.
+  visits.forEach(v=>queuePendingVisit(buildVisitPayload(v),false));
+  flushPendingVisits(true).catch(()=>{});
+}
+window.addEventListener('online',()=>{flushPendingVisits().catch(()=>{});});
 
 // ── TABLE ──
 function renderTable(){
@@ -1484,8 +2007,14 @@ function renderTable(){
   // Separate active and done
   const {issuedIds,returnedIds}=getSessionStatuses();
   const isDoneVisit=v=>{
-    if(!v.orders||!v.orders.length) return false;
-    return v.orders.every(o=>o.id==='__other__'||issuedIds.has(o.id)||returnedIds.has(o.id));
+    if(v.syncBlocked||!v.orders||!v.orders.length) return false;
+    return v.orders.every(o=>{
+      if(o.id==='__other__') return true;
+      const op=o.operation||o.type||v.operation;
+      if(['issue','pickup'].includes(op)) return issuedIds.has(o.id);
+      if(['return','dropoff'].includes(op)) return returnedIds.has(o.id);
+      return false;
+    });
   };
   const active=visits.filter(v=>!isDoneVisit(v));
   const done=visits.filter(v=>isDoneVisit(v));
@@ -1501,13 +2030,16 @@ function renderTable(){
       return`<div class="order-tag"><span>${esc(o.id)}</span>${o.client?`<span class="tag-client">${esc(o.client)}</span>`:''}</div>`;
     }).join('')+`</div>`:`<span style="font-size:10px;color:var(--light)">—</span>`;
     const commentHtml=v.comment?`<div style="font-size:10px;color:var(--muted);margin-top:3px;font-style:italic">💬 ${esc(v.comment)}</div>`:'';
+    const syncErrorHtml=v.syncError?`<div style="font-size:10px;color:#c0392b;margin-top:3px">⚠️ ${esc(v.syncError)}</div>`:'';
+    const visitorKey=VIS_LBL[v.visitor]?v.visitor:'client';
+    const operationKey=OP_LBL[v.operation]?v.operation:'issue';
     return`<tr class="lrow${isDoneVisit(v)?' lrow-done':''}">
-      <td style="min-width:58px"><span class="time-chip">${v.time}</span>${datePart}</td>
-      <td><span class="tchip ${v.visitor}">${VIS_LBL[v.visitor]}</span></td>
-      <td><span class="ochip ${v.operation}">${OP_LBL[v.operation]}</span></td>
-      <td>${ordHtml}${commentHtml}</td>
-      <td><span class="time-rec">${v.timeAuto||'—'}</span></td>
-      <td><button class="dbtn" onclick="delVisit(${visits.indexOf(v)})">×</button></td>
+      <td style="min-width:58px"><span class="time-chip">${esc(v.time||'—')}</span>${datePart}</td>
+      <td><span class="tchip ${visitorKey}">${esc(VIS_LBL[v.visitor]||'Требует проверки')}</span></td>
+      <td><span class="ochip ${operationKey}">${esc(OP_LBL[v.operation]||'Требует проверки')}</span></td>
+      <td>${ordHtml}${commentHtml}${syncErrorHtml}</td>
+      <td><span class="time-rec">${esc(v.timeAuto||'—')}</span></td>
+      <td><button class="dbtn" ${v._deleting?'disabled':''} onclick="delVisit(${visits.indexOf(v)})">${v._deleting?'…':'×'}</button></td>
     </tr>`;
   };
 
@@ -1519,58 +2051,84 @@ function renderTable(){
   }
   tbody.innerHTML=html;
 
-  document.getElementById('subBtn').disabled=false;
-  document.getElementById('subHint').textContent=`${visits.length} ${pl(visits.length,'визит','визита','визитов')} · готово к отправке`;
+  const blockedCount=visits.filter(v=>v.syncBlocked).length;
+  document.getElementById('subBtn').disabled=closingShift||openingShift||!!draftConflict||blockedCount>0;
+  document.getElementById('subHint').textContent=blockedCount
+    ? `${visits.length} ${pl(visits.length,'визит','визита','визитов')} · ⚠️ ${blockedCount} ${pl(blockedCount,'ошибка','ошибки','ошибок')}`
+    : `${visits.length} ${pl(visits.length,'визит','визита','визитов')} · готово к отправке`;
   // Бейдж на табе «Смена»
   const vb=document.getElementById('visitsBadge');
   if(vb){ vb.textContent=visits.length; vb.style.display=visits.length?'inline-block':'none'; }
 }
 
 async function delVisit(i){
+  if(openingShift||draftConflict){shiftMutationBlocked();return;}
+  if(closingShift){showToast('Дождитесь завершения закрытия смены');return;}
   const visit = visits[i];
   if(!visit) return;
+  if(!visit.clientEventId) buildVisitPayload(visit);
+  const eventId=visit.clientEventId;
+  if(deletingEvents.has(eventId)) return deletingEvents.get(eventId);
 
   // Строим текст подтверждения
   const realOrders = (visit.orders||[]).filter(o=>o.id&&o.id!=='__other__');
   const hasOtherFlag = (visit.orders||[]).some(o=>o.id==='__other__');
   const lines = [];
   if(realOrders.length){
-    const isReturn = ['return','dropoff','both'].includes(visit.operation);
-    const action = isReturn ? 'возврат' : 'выдачу';
-    lines.push(`Заказ${realOrders.length>1?'ы':''} ${realOrders.map(o=>o.id).join(', ')} вернётся на ${action}.`);
+    lines.push(`Заказ${realOrders.length>1?'ы':''} ${realOrders.map(o=>o.id).join(', ')} снова появится в нужном статусе.`);
   }
   if(hasOtherFlag) lines.push('Заказ не из списка будет удалён.');
   const ok = await stConfirm('Удалить визит?', lines.join('\n'), 'Удалить');
   if(!ok) return;
+  visit._deleting=true; renderTable();
+  const task=(async()=>{
+    const queuedPayload=readPendingVisits().find(x=>x.clientEventId===eventId)||(!visit.visitId?buildVisitPayload(visit):null);
+    cancelledEvents.add(eventId);
+    removePendingVisit(eventId);
+    const inFlight=sendingEvents.get(eventId);
+    if(inFlight){ try{ const r=await inFlight; if(r?.visitId){visit.visitId=r.visitId;visit.shiftId=r.shiftId;} }catch(e){} }
 
-  // Немедленно убираем из серверных наборов и запоминаем на 90 сек —
-  // чтобы refresh не вернул заказ, пока сервер не обработал deleteVisit
-  realOrders.forEach(o=>{
-    serverIssuedToday.delete(o.id);
-    serverReturnedToday.delete(o.id);
-    recentlyDeletedOrders.set(o.id, Date.now());
-  });
-  if(hasOtherFlag){
-    serverOtherVisits = serverOtherVisits.filter(v=>v.time !== visit.time);
-    recentlyDeletedOther.set(visit.time, Date.now());
-  }
+    try{
+      await WHApi.deleteVisit({visitId:visit.visitId||null,clientEventId:eventId});
+    }catch(e){
+      cancelledEvents.delete(eventId);
+      visit._deleting=false;
+      if(queuedPayload&&!visit.visitId) queuePendingVisit(queuedPayload,false);
+      showToast(`⚠️ Не удалось удалить: ${e.message||e}`,'#E74C3C');
+      renderTable();
+      return false;
+    }
+    cancelledEvents.delete(eventId);
 
-  // Отправляем удаление на сервер (fire-and-forget)
-  if(shiftStart){
-    WHApi.deleteVisit({shiftStart:shiftStart.toISOString(),worker,timeAuto:visit.time||visit.timeAuto||''}).catch(()=>{});
-  }
+    // Снимаем только ту lifecycle-операцию, которая была в этом визите.
+    realOrders.forEach(o=>{
+      const op=o.operation||o.type||visit.operation;
+      if(['issue','pickup'].includes(op)) serverIssuedToday.delete(o.id);
+      if(['return','dropoff'].includes(op)) serverReturnedToday.delete(o.id);
+    });
+    if(hasOtherFlag){
+      const key=otherVisitKey(visit);
+      serverOtherVisits=serverOtherVisits.filter(v=>otherVisitKey(v)!==key);
+    }
 
-  visits.splice(i,1);
-  visits.forEach((v,j)=>v.n=j+1);
-  renderTable(); updateOrdersBar(); renderOrderCards(); populateOrders(); saveDraft();
+    const localIndex=visits.findIndex(v=>v.clientEventId===eventId);
+    if(localIndex>=0) visits.splice(localIndex,1);
+    visits.forEach((v,j)=>v.n=j+1);
+    renderTable(); updateOrdersBar(); renderOrderCards(); populateOrders(); saveDraft();
+    await refreshOrdersFromServer();
+    return true;
+  })().finally(()=>deletingEvents.delete(eventId));
+  deletingEvents.set(eventId,task);
+  return task;
 }
 
 // ── ORDERS BAR ──
 // Объединяет «не из списка» визиты из сессии + сервера (без дублей по time)
 function getOtherVisits(){
-  const sessionOther = visits.filter(v=>(v.orders||[]).some(o=>o.id==='__other__'));
-  const sessionTimes = new Set(sessionOther.map(v=>v.time));
-  return [...sessionOther, ...serverOtherVisits.filter(v=>!sessionTimes.has(v.time))];
+  const today=todayMsk();
+  const sessionOther = visits.filter(v=>!v.syncBlocked&&v.date===today&&(v.orders||[]).some(o=>o.id==='__other__'));
+  const sessionKeys = new Set(sessionOther.map(otherVisitKey));
+  return [...sessionOther, ...serverOtherVisits.filter(v=>v.date===today&&!sessionKeys.has(otherVisitKey(v)))];
 }
 
 function updateOrdersBar(){
@@ -1684,17 +2242,17 @@ function orderCard(o, modifier){
   const txt=locked?'⏳ Сначала выдайте':sameDayIssued?'✓ Выдан · ↩ возврат сегодня':eff==='done'&&isDoneReturn?'✓ Возвращён':eff==='done'?'✓ Выдан':eff==='return'?'🔄 К возврату':isOverdue?overdueLabel:'⏳ Ожидает';
   const opacity=locked?'opacity:0.45;':'';
   const workerHint = sameDayIssued
-    ? (o.issuedBy ? `<span class="oc-worker">👤 ${o.issuedBy}</span>` : '')
+    ? (o.issuedBy ? `<span class="oc-worker">👤 ${esc(o.issuedBy)}</span>` : '')
     : eff==='done' && isDoneReturn && o.returnedBy
-      ? `<span class="oc-worker">👤 ${o.returnedBy}</span>`
+      ? `<span class="oc-worker">👤 ${esc(o.returnedBy)}</span>`
     : eff==='done' && o.issuedBy
-      ? `<span class="oc-worker">👤 ${o.issuedBy}</span>`
+      ? `<span class="oc-worker">👤 ${esc(o.issuedBy)}</span>`
     : '';
   const commentHtml=_commentMap[o.id]?`<div style="font-size:10px;color:var(--muted);margin-top:3px;font-style:italic">💬 ${esc(_commentMap[o.id])}</div>`:'';
   return`<div class="order-card ${cls}" style="${opacity}">
     <div class="oc-top"><span class="oc-id">${esc(o.id)}</span><span class="oc-status ${cls}">${txt}</span></div>
     <div class="oc-client">${esc(o.client||'—')}</div>
-    <div class="oc-meta"><span>📅 возврат ${o.returnDate||'—'}</span><span>${o.delivery?.includes('Наш')?'🚛':'🚶'} ${o.delivery||'—'}</span>${workerHint}</div>
+    <div class="oc-meta"><span>📅 возврат ${esc(o.returnDate||'—')}</span><span>${o.delivery?.includes('Наш')?'🚛':'🚶'} ${esc(o.delivery||'—')}</span>${workerHint}</div>
     ${commentHtml}
   </div>`;
 }
@@ -1705,17 +2263,18 @@ function otherVisitCard(v){
   const txt = isReturn ? '✓ Возвращён' : '✓ Выдан';
   const deliveryMap = {client:'🚶 Самовывоз', yandex:'🚕 Курьер Яндекс', our:'🚛 Наша доставка'};
   const delivery = deliveryMap[v.visitor] || v.visitor || '—';
-  const commentHtml = v.comment ? `<div style="font-size:10px;color:var(--muted);margin-top:3px;font-style:italic">💬 ${v.comment}</div>` : '';
+  const commentHtml = v.comment ? `<div style="font-size:10px;color:var(--muted);margin-top:3px;font-style:italic">💬 ${esc(v.comment)}</div>` : '';
   return`<div class="order-card ${cls}">
     <div class="oc-top"><span class="oc-id" style="color:var(--yandex)">⚠️ нет в списке</span><span class="oc-status ${cls}">${txt}</span></div>
-    <div class="oc-client">— · ${v.time||'—'}</div>
-    <div class="oc-meta"><span>${delivery}</span><span class="oc-worker">👤 ${worker||'—'}</span></div>
+    <div class="oc-client">— · ${esc(v.time||'—')}</div>
+    <div class="oc-meta"><span>${esc(delivery)}</span><span class="oc-worker">👤 ${esc(v.worker||worker||'—')}</span></div>
     ${commentHtml}
   </div>`;
 }
 
 // ── MODAL ──
 function openModal(){
+  if(openingShift||draftConflict){shiftMutationBlocked();return;}
   if(!worker){ showToast('Сначала начните смену'); return; }
   const c=visits.filter(v=>v.visitor==='client').length, y=visits.filter(v=>v.visitor==='yandex').length, o=visits.filter(v=>v.visitor==='our').length;
   const allOrds=visits.flatMap(v=>(v.orders||[]).filter(ord=>ord.id&&ord.id!=='__other__'));
@@ -1723,7 +2282,7 @@ function openModal(){
   const shiftStartMsk = shiftStart ? toMskTime(shiftStart) : '—';
   const shiftNight = shiftStart ? isNightAt(shiftStart) : isNight();
   document.getElementById('modalRows').innerHTML=`
-    <div class="mrow"><span>Кладовщик</span><b>${worker}</b></div>
+    <div class="mrow"><span>Кладовщик</span><b>${esc(worker)}</b></div>
     <div class="mrow"><span>Смена</span><b>${shiftNight?'Ночная':'Дневная'}</b></div>
     <div class="mrow"><span>Время с – по</span><b>${shiftStartMsk} – ${nowTime()} МСК</b></div>
     <div class="mrow"><span>Визитов</span><b>${visits.length}</b></div>
@@ -1734,32 +2293,89 @@ function openModal(){
 function closeModal(e){ if(!e||e.target===document.getElementById('ovl')) document.getElementById('ovl').classList.remove('show'); }
 
 // ── SUBMIT ──
+async function mergeServerDraftForClose(){
+  const snapshot=await WHApi.getData(worker);
+  if(!snapshot?.draft) return;
+  const local={worker,shiftStart:shiftStart.toISOString(),clientShiftId,
+    savedAt:new Date().toISOString(),visits:visits.map(v=>{
+      const {_deleting,_sending,...persisted}=v;return JSON.parse(JSON.stringify(persisted));
+    })};
+  if(!sameDraftShift(local,snapshot.draft)){
+    throw new Error('на сервере есть другая незакрытая смена');
+  }
+  const merged=normalizeDraft(pickNewestDraft(JSON.stringify(local),snapshot.draft));
+  visits=merged.visits;
+  ensureVisitClientIds();applyStoredVisitAcks();
+  enqueueRestoredVisits();
+  renderTable();updateOrdersBar();renderOrderCards();populateOrders();
+}
+
 async function confirmSubmit(){
+  if(closingShift||openingShift||draftConflict){if(openingShift||draftConflict)shiftMutationBlocked();return;}
+  if(visits.some(v=>v.syncBlocked)){
+    showToast('Исправьте или удалите визиты с ошибкой перед закрытием смены','#E74C3C');
+    return;
+  }
+  closingShift=true;
+  let closed=false;
+  let payload=null;
   document.getElementById('ovl').classList.remove('show');
-  stopAutosave();
-  stopOrdersRefresh();
-  const n2=mskNow(); const mskDateClose=pad(n2.getUTCDate())+'.'+pad(n2.getUTCMonth()+1)+'.'+n2.getUTCFullYear();
-  const payload={
-    action:'closeShift',
-    shiftDate:mskDateClose,
-    shiftStart:shiftStart?shiftStart.toISOString():new Date().toISOString(),
-    shiftEnd:new Date().toISOString(),
-    worker, isNight:(shiftStart?isNightAt(shiftStart):isNight())?'Ночь':'День',
-    totalEntries:visits.length, isDraft:false,
-    entries:visits.map(v=>({
-      visitor:v.visitor, operation:v.operation,
-      orders:v.orders||[], orderId:v.orderId||'', orderClient:v.orderClient||'',
-      orderReturnDate:v.orderReturnDate||'', orderDelivery:v.orderDelivery||'',
-      comment:v.comment||'', date:v.date||'', time:v.time, timeAuto:v.timeAuto,
-      timestamp:v.ts, night:v.night?'Ночь':'День'
-    }))
-  };
-  const s=JSON.parse(LS.get('wh_shifts')||'[]'); s.push(payload);
-  if(s.length>20) s.splice(0, s.length-20); // не даём localStorage расти бесконечно
-  LS.set('wh_shifts',JSON.stringify(s));
-  LS.remove(draftKey());
-  try{await WHApi.closeShift(payload)}catch(e){console.error('closeShift failed',e)}
-  showSuccess(payload);
+  stopAutosave();stopOrdersRefresh();checkReady();renderTable();
+  try{
+    const deleteResults=await Promise.allSettled([...deletingEvents.values()]);
+    if(deleteResults.some(x=>x.status==='rejected'||x.value===false)){
+      throw new Error('один визит не удалось удалить');
+    }
+
+    await waitForDraftSaves();
+    await mergeServerDraftForClose();
+
+    // Два прохода закрывают гонку с уже начавшейся отправкой: повторный POST
+    // безопасен, потому что clientEventId идемпотентен.
+    if(!await flushPendingVisits(true) || !await flushPendingVisits(true)){
+      throw new Error('есть неотправленные визиты');
+    }
+    if(readPendingVisits().some(isCurrentShiftPayload)){
+      throw new Error('есть неотправленные визиты');
+    }
+    await waitForDraftSaves();
+
+    payload={
+      action:'closeShift',clientShiftId,
+      shiftDate:shiftDateDisplay(),
+      shiftStart:shiftStart.toISOString(),shiftEnd:new Date().toISOString(),
+      worker,isNight:isNightAt(shiftStart)?'Ночь':'День',
+      totalEntries:visits.length,isDraft:false,
+      entries:visits.map(v=>({
+        visitor:v.visitor,operation:v.operation,
+        orders:v.orders||[],orderId:v.orderId||'',orderClient:v.orderClient||'',
+        orderReturnDate:v.orderReturnDate||'',orderDelivery:v.orderDelivery||'',
+        comment:v.comment||'',date:v.date||'',time:v.time,timeAuto:v.timeAuto,
+        timestamp:v.ts,night:v.night?'Ночь':'День'
+      }))
+    };
+    await WHApi.closeShift(payload);
+    closed=true;
+
+    let history=[];
+    try{
+      const stored=JSON.parse(LS.get('wh_shifts')||'[]');
+      if(Array.isArray(stored)) history=stored;
+    }catch(e){}
+    history.push(payload);
+    if(history.length>20) history.splice(0,history.length-20);
+    LS.set('wh_shifts',JSON.stringify(history));
+    LS.remove(draftKey());
+    showSuccess(payload);
+  }catch(e){
+    showToast(`⚠️ Смена не закрыта: ${e.message||e}`,'#E74C3C');
+  }finally{
+    if(!closed){
+      closingShift=false;
+      if(!draftConflict)startAutosave();
+      startOrdersRefresh();checkReady();renderTable();
+    }
+  }
 }
 
 function showSuccess(p){
@@ -1774,7 +2390,7 @@ function showSuccess(p){
   else if(hrs.day>0)   hoursLine += ' ☀️ дневная';
   document.getElementById('sucSub').textContent=`${p.worker} · ${p.shiftDate}`;
   document.getElementById('sucSum').innerHTML=`
-    <div class="sr"><span class="sr-l">Кладовщик</span><span class="sr-v">${p.worker}</span></div>
+    <div class="sr"><span class="sr-l">Кладовщик</span><span class="sr-v">${esc(p.worker)}</span></div>
     <div class="sr"><span class="sr-l">Смена с – по (МСК)</span><span class="sr-v">${tStart} – ${tEnd}</span></div>
     <div class="sr"><span class="sr-l">Длительность</span><span class="sr-v">${hoursLine}</span></div>
     <div class="sr"><span class="sr-l">Визитов</span><span class="sr-v">${p.totalEntries}</span></div>
@@ -1786,7 +2402,7 @@ function showSuccess(p){
 }
 
 function resetAll(){
-  visits=[]; visitor=null; operation=null; shiftStart=null; pendingOrders=[]; hasOther=false;
+  visits=[]; visitor=null; operation=null; shiftStart=null; clientShiftId=null; pendingOrders=[]; hasOther=false; closingShift=false;
   exitViewOnly();
   stopAutosave(); stopOrdersRefresh();
   const vb=document.getElementById('visitsBadge'); if(vb) vb.style.display='none';

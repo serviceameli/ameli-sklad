@@ -327,9 +327,9 @@ table.dt tbody tr:last-child td{border-bottom:none}
     <button class="pbtn" onclick="setPeriod(90,this)">3 мес.</button>
     <button class="pbtn" onclick="setPeriod(365,this)">Год</button>
     <div class="drange">
-      <input type="date" id="dateFrom" onchange="renderStats()">
+      <input type="date" id="dateFrom" onchange="onCustomRangeChange()">
       <span style="color:var(--light);font-size:11px">—</span>
-      <input type="date" id="dateTo" onchange="renderStats()">
+      <input type="date" id="dateTo" onchange="onCustomRangeChange()">
     </div>
   </div>
   <div class="rfbar">
@@ -480,13 +480,14 @@ table.dt tbody tr:last-child td{border-bottom:none}
       <tbody id="logTbody"></tbody>
     </table>
   </div>
+  <div id="logPager" style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:10px;font-size:11px;color:var(--muted)"></div>
 </div>
 <!-- ══ СВЕРКА ══ -->
 <div class="tview" id="tab-link">
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
     <div>
       <div style="font-size:18px;font-weight:700;color:var(--black)">🔗 Сверка визитов с заказами</div>
-      <div style="font-size:11px;color:var(--muted);margin-top:2px">Визиты «нет в списке» за последние 7 дней</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:2px">Все нерешённые визиты «нет в списке»</div>
     </div>
     <button class="rfbtn" onclick="loadUnmatched()">↻ Обновить</button>
   </div>
@@ -527,8 +528,8 @@ table.dt tbody tr:last-child td{border-bottom:none}
 </div>
 
 <script src="vendor/supabase.min.js"></script>
-<script src="config.js?v=3"></script>
-<script src="api.js?v=3"></script>
+<script src="config.js?v=20260714"></script>
+<script src="api.js?v=20260714"></script>
 <script>
 // ═══════════════
 // URL берётся из файла config.js (лежит рядом с этим файлом)
@@ -540,14 +541,18 @@ const DAYS   = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
 const VIS    = {client:'Клиент',yandex:'Яндекс',our:'Наш курьер'};
 const OPL    = {issue:'Выдача',return:'Возврат',pickup:'Получение',dropoff:'Возврат',both:'Получ.+Возврат'};
 
-let allShifts=[], allVisits=[], todayOrders=[], serverProcessed={issued:[],returned:[],otherVisits:[]};
+let allShifts=[], allVisits=[], todayOrders=[], archivedOrders=[], serverProcessed={issued:[],returned:[],issuedToday:[],returnedToday:[],otherVisits:[]};
 let statsPeriod=30, wPeriod=30, tsPeriod=30, logPeriod=7, hPeriod=30;
 let charts={};
+let loadDataGeneration=0, unmatchedGeneration=0;
+const LOG_PAGE_SIZE=300;
+let logVisibleLimit=LOG_PAGE_SIZE;
 
 // Moscow time helpers
 function mskNow(){ return new Date(Date.now() + MSK_OFFSET*3600000); }
 function fmtMsk(d){ return d.toISOString().split('T')[0]; } // YYYY-MM-DD in MSK
 function todayMsk(){ return fmtMsk(mskNow()); }
+function periodStartISO(days){ return fmtMsk(new Date(mskNow().getTime()-Math.max(0,days-1)*864e5)); }
 function parseMskHour(timeStr){
   if(!timeStr) return null;
   const s=timeStr.toString();
@@ -568,29 +573,47 @@ document.addEventListener('DOMContentLoaded',()=>{
   document.getElementById('todayDateLbl').textContent =
     new Date().toLocaleDateString('ru',{weekday:'long',day:'numeric',month:'long',timeZone:'Europe/Moscow'});
   loadData();
-  loadWorkersDB();
+  loadWorkersDB().then(renderWorkers).catch(e=>showToast('Ошибка загрузки кладовщиков: '+(e.message||e)));
   setInterval(loadData, 120000); // автообновление раз в 2 минуты
 });
 
-function fmt(d){ return d instanceof Date ? d.toISOString().split('T')[0] : d; }
-function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-function jsq(s){ return "'"+String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'")+"'"; }
+function fmt(d){ return d instanceof Date ? fmtMsk(d) : d; }
+function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+function jsq(s){ return "'"+esc(String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\r/g,'\\r').replace(/\n/g,'\\n'))+"'"; }
+function customRangeDays(){
+  const from=document.getElementById('dateFrom')?.value;
+  if(!from) return 0;
+  return Math.max(1,Math.floor((new Date(todayMsk()+'T12:00:00')-new Date(from+'T12:00:00'))/864e5)+1);
+}
+function onCustomRangeChange(){ loadData(); }
 
 async function loadData(){
+  const requestGeneration=++loadDataGeneration;
   if(document.getElementById('rfts')) document.getElementById('rfts').textContent='Загрузка...';
-  const local = JSON.parse(localStorage.getItem('wh_shifts')||'[]');
+  let local=[];
+  try{local=JSON.parse(localStorage.getItem('wh_shifts')||'[]');}catch(e){}
+  let remoteLoaded=false, loadError=null;
   try{
     // Берём самый длинный из активных периодов, чтобы все вкладки получили нужные данные
-    const maxDays = Math.max(statsPeriod, wPeriod, tsPeriod, logPeriod, hPeriod);
-    const fromDate = fmtMsk(new Date(mskNow().getTime() - maxDays * 864e5));
+    const maxDays = Math.max(statsPeriod, wPeriod, tsPeriod, logPeriod, hPeriod, wdPeriod, customRangeDays());
+    const fromDate = periodStartISO(maxDays);
     const j=await WHApi.getAll(fromDate);
-    allShifts  = j.shifts||local;
-    todayOrders= j.orders||[];
-    if(j.processedOrders) serverProcessed={issued:j.processedOrders.issued||[],returned:j.processedOrders.returned||[],otherVisits:j.processedOrders.otherVisits||[]};
+    if(requestGeneration!==loadDataGeneration) return;
+    const nextShifts=j.shifts||local;
+    const nextOrders=j.orders||[];
+    const nextArchived=j.archivedOrders||[];
+    const nextProcessed=j.processedOrders?{
+      issued:j.processedOrders.issued||[],returned:j.processedOrders.returned||[],
+      issuedToday:j.processedOrders.issuedToday||[],returnedToday:j.processedOrders.returnedToday||[],
+      otherVisits:j.processedOrders.otherVisits||[]
+    }:serverProcessed;
+    // Меняем снимок только целиком, после успешного ответа.
+    allShifts=nextShifts; todayOrders=nextOrders; archivedOrders=nextArchived; serverProcessed=nextProcessed;
+    remoteLoaded=true;
   }catch(e){
-    allShifts=local; todayOrders=[];
-    const ts=document.getElementById('rfts');
-    if(ts) ts.textContent='⚠️ Нет соединения — данные могут быть устаревшими';
+    if(requestGeneration!==loadDataGeneration) return;
+    loadError=e;
+    if(!allShifts.length) allShifts=local;
   }
 
   // Flatten: one record per VISIT (with all orders inside)
@@ -609,6 +632,7 @@ async function loadData(){
         worker:    s.worker,
         shiftDate: s.shiftDate,
         shiftStart:s.shiftStart,
+        shiftId:   e.shiftId||s.id||s.shiftId,
         shiftEnd:  s.shiftEnd,
         shiftIsNight: s.isNight,
         ts:        e.timestamp||s.shiftStart||new Date().toISOString(),
@@ -622,11 +646,22 @@ async function loadData(){
     });
   });
 
-  if(document.getElementById('rfts'))
-    document.getElementById('rfts').textContent='Обновлено '+new Date().toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit',timeZone:'Europe/Moscow'})+' МСК';
+  if(document.getElementById('rfts')) document.getElementById('rfts').textContent=remoteLoaded
+    ? 'Обновлено '+new Date().toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit',timeZone:'Europe/Moscow'})+' МСК'
+    : '⚠️ Ошибка загрузки: '+(loadError?.message||loadError||'нет соединения')+' — показаны последние данные';
 
   renderAll();
-  WHApi.getUnmatched().then(j=>{ unmatchedData=j; updateLinkBadge(); }).catch(()=>{});
+  const unmatchedRequestGeneration=++unmatchedGeneration;
+  WHApi.getUnmatched().then(j=>{
+    if(unmatchedRequestGeneration!==unmatchedGeneration) return;
+    unmatchedData=j; unmatchedLoadError=null; updateLinkBadge();
+    if(document.getElementById('tab-link')?.classList.contains('active')) renderLinkTab();
+  }).catch(e=>{
+    if(unmatchedRequestGeneration!==unmatchedGeneration) return;
+    unmatchedLoadError=e;
+    updateLinkBadge();
+    if(document.getElementById('tab-link')?.classList.contains('active')) renderLinkTab();
+  });
 }
 
 function renderAll(){
@@ -674,6 +709,13 @@ function getOrderStatuses(){
   return {issued,returned};
 }
 
+function orderOperation(v,o){
+  const op=o&&Object.prototype.hasOwnProperty.call(o,'operation')?o.operation:v.operation;
+  if(op==='pickup') return 'issue';
+  if(op==='dropoff') return 'return';
+  return op;
+}
+
 function renderOrders(){
   const {issued,returned} = getOrderStatuses();
 
@@ -688,6 +730,8 @@ function renderOrders(){
   // ⚠️ Статус зависит от ТИПА заказа. Старая версия проверяла issued первым,
   // и многодневный заказ «к возврату» (выданный неделю назад) показывался как «✓ Выдан».
   const statusOf = o => {
+    if(o.processedTodayReturn) return 'returned';
+    if(o.processedTodayIssue && effectiveType(o)==='issue') return 'issued';
     const t = effectiveType(o);
     if(t==='done')   return 'returned';                                 // однодневка закрыта
     if(t==='return') return returned.has(o.id) ? 'returned' : 'pending';
@@ -697,23 +741,22 @@ function renderOrders(){
   const overdueList = todayOrders.filter(o=>o.overdue && statusOf(o)==='pending');
   const toIssue  = todayOrders.filter(o=>!o.overdue && effectiveType(o)==='issue');
   const toReturn = todayOrders.filter(o=>!o.overdue && effectiveType(o)==='return');
+  const completedToday = todayOrders.filter(o=>!o.overdue && effectiveType(o)==='done');
 
   // «Нет в списке» визиты — из allVisits по флагу isOther + фильтр по сегодняшней дате
   const todayStr2 = todayMsk();
-  const otherToday = allVisits.filter(v => v.isOther && v.dateISO === todayStr2);
-  const otherIssued   = otherToday.filter(v=>['issue','pickup','both'].includes(v.operation));
-  const otherReturned = otherToday.filter(v=>['return','dropoff','both'].includes(v.operation));
+  const otherToday = allVisits.filter(v => v.isOther && v.otherOperation && v.dateISO === todayStr2);
+  const otherIssued   = otherToday.filter(v=>['issue','pickup'].includes(v.otherOperation));
+  const otherReturned = otherToday.filter(v=>['return','dropoff'].includes(v.otherOperation));
 
   // Summary (при наличии просрочки карточек 5 — расширяем сетку)
   document.getElementById('ordersSummary').style.gridTemplateColumns =
     overdueList.length ? 'repeat(5,1fr)' : '';
-  let pI=0,iI=0,pR=0,rR=0;
-  toIssue.forEach(o=>{ const s=statusOf(o); if(s==='issued')iI++; else pI++; });
-  toReturn.forEach(o=>{ const s=statusOf(o); if(s==='returned')rR++; else pR++; });
-  // Однодневки, уже выданные (они в toReturn) — это тоже сегодняшние выдачи
-  const sameDayIssuedCnt = todayOrders.filter(o=>o.sameDay && issued.has(o.id)).length;
-  const totalIssued   = iI + sameDayIssuedCnt + otherIssued.length;
-  const totalReturned = rR + otherReturned.length;
+  let pI=0,pR=0;
+  toIssue.forEach(o=>{ if(statusOf(o)==='pending')pI++; });
+  toReturn.forEach(o=>{ if(statusOf(o)==='pending')pR++; });
+  const totalIssued   = new Set(serverProcessed.issuedToday||[]).size + otherIssued.length;
+  const totalReturned = new Set(serverProcessed.returnedToday||[]).size + otherReturned.length;
   document.getElementById('ordersSummary').innerHTML=`
     ${overdueList.length?`<div class="sc" style="border-left:3px solid #E74C3C"><div class="sc-lbl">🔴 Просрочено</div><div class="sc-n" style="color:#E74C3C">${overdueList.length}</div><div class="sc-s">требует внимания</div></div>`:''}
     <div class="sc acc"><div class="sc-lbl">К выдаче — ожидают</div><div class="sc-n">${pI}</div><div class="sc-s">из ${toIssue.length}</div></div>
@@ -747,8 +790,8 @@ function renderOrders(){
       : typeLabel==='issue'
       ? `<span class="badge pending">⏳ Ожидает</span>`
       : `<span class="badge" style="background:rgba(61,155,233,.15);color:#1a6fa0">🔄 Ожидает</span>`;
-    const timeInfo = o.issueTime||o.returnTime ? `<br><span style="font-size:10px;color:var(--muted)">${o.issueTime||o.returnTime}</span>` : '';
-    const commentHtml = commentMap[o.id] ? `<br><span style="font-size:10px;color:var(--muted);font-style:italic">💬 ${commentMap[o.id]}</span>` : '';
+    const timeInfo = o.issueTime||o.returnTime ? `<br><span style="font-size:10px;color:var(--muted)">${esc(o.issueTime||o.returnTime)}</span>` : '';
+    const commentHtml = commentMap[o.id] ? `<br><span style="font-size:10px;color:var(--muted);font-style:italic">💬 ${esc(commentMap[o.id])}</span>` : '';
     let overdueHint = '';
     if(isOv){
       const isIssueOv = o.overdueType==='issue';
@@ -757,16 +800,16 @@ function renderOrders(){
       const ovDate = parts.length===3 ? new Date(`${parts[2]}-${parts[1]}-${parts[0]}`) : null;
       const days = ovDate ? Math.floor((Date.now()-ovDate)/86400000) : 0;
       const lbl = isIssueOv ? 'выдача' : 'возврат';
-      overdueHint = `<br><span style="font-size:10px;color:#c0392b">📅 ${lbl} ${dateStr||''}${days>0?` · просрочен ${days} дн.`:''}</span>`;
+      overdueHint = `<br><span style="font-size:10px;color:#c0392b">📅 ${lbl} ${esc(dateStr||'')}${days>0?` · просрочен ${days} дн.`:''}</span>`;
     }
     const delBtn = `<button class="del-order-btn" onclick="deleteOrderUI(${jsq(o.id)},${jsq(o.client||'')})">🗑</button>`;
     return {done, html:`<tr${isOv?' style="background:rgba(231,76,60,.03)"':''}>
       <td>${statusBadge}</td>
-      <td><span class="onum">${o.id}</span></td>
-      <td><strong>${o.client||'—'}</strong>${o.company?`<br><span style="font-size:10px;color:var(--muted)">${o.company}</span>`:''}${commentHtml}${overdueHint}</td>
-      <td style="font-family:'JetBrains Mono',monospace;font-size:11px">${dateRange}${timeInfo}</td>
+      <td><span class="onum">${esc(o.id)}</span></td>
+      <td><strong>${esc(o.client||'—')}</strong>${o.company?`<br><span style="font-size:10px;color:var(--muted)">${esc(o.company)}</span>`:''}${commentHtml}${overdueHint}</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:11px">${esc(dateRange)}${timeInfo}</td>
       <td>${delivBadge}</td>
-      <td>${o.worker?`<span style="font-size:11px;font-weight:600;color:var(--mid)">${o.worker}</span>`:'—'}</td>
+      <td>${o.worker?`<span style="font-size:11px;font-weight:600;color:var(--mid)">${esc(o.worker)}</span>`:'—'}</td>
       <td>${delBtn}</td>
     </tr>`};
   };
@@ -802,19 +845,19 @@ function renderOrders(){
   // Строки «нет в списке» для таблицы
   const deliveryMap = {client:'🚶 Самовывоз', yandex:'🚕 Яндекс', our:'🚛 Наша доставка'};
   const otherRowHtml = v => {
-    const isRet = ['return','dropoff','both'].includes(v.operation);
+    const isRet = ['return','dropoff'].includes(v.otherOperation);
     const badge = isRet
       ? `<span class="badge returned">✓ Возвращён</span>`
       : `<span class="badge issued">✓ Выдан</span>`;
     const deliv = deliveryMap[v.visitor] || v.visitor || '—';
-    const commentHtml = v.comment ? `<br><span style="font-size:10px;color:var(--muted);font-style:italic">💬 ${v.comment}</span>` : '';
+    const commentHtml = v.comment ? `<br><span style="font-size:10px;color:var(--muted);font-style:italic">💬 ${esc(v.comment)}</span>` : '';
     return `<tr>
       <td>${badge}</td>
       <td><span style="font-size:10px;font-weight:600;color:#c08000;background:rgba(240,180,0,.12);padding:2px 6px;border-radius:4px">⚠️ нет в списке</span></td>
-      <td><span style="color:var(--muted)">— · ${v.time||'—'}</span>${commentHtml}</td>
+      <td><span style="color:var(--muted)">— · ${esc(v.time||'—')}</span>${commentHtml}</td>
       <td></td>
-      <td><span style="font-size:12px">${deliv}</span></td>
-      <td>${v.worker?`<span style="font-size:11px;font-weight:600;color:var(--mid)">${v.worker}</span>`:'—'}</td>
+      <td><span style="font-size:12px">${esc(deliv)}</span></td>
+      <td>${v.worker?`<span style="font-size:11px;font-weight:600;color:var(--mid)">${esc(v.worker)}</span>`:'—'}</td>
     </tr>`;
   };
 
@@ -831,17 +874,32 @@ function renderOrders(){
     buildSection(overdueList,'issue','🔴 Просрочены', true) +
     buildSection(toIssue,'issue','📦 К выдаче сегодня') +
     buildSection(toReturn,'return','🔄 К возврату сегодня') +
+    buildSection(completedToday,'return','✅ Завершены сегодня') +
     otherSection +
+    buildArchivedOrdersSection() +
     `</div>`;
+}
+
+function buildArchivedOrdersSection(){
+  if(!archivedOrders.length) return '';
+  const rows=archivedOrders.map(o=>`<tr>
+    <td><span class="badge" style="background:#f2f2f2;color:var(--muted)">Архив</span></td>
+    <td><span class="onum">${esc(o.id)}</span></td>
+    <td><strong>${esc(o.client||'—')}</strong></td>
+    <td>${esc([o.issueDate,o.returnDate].filter(Boolean).join(' → '))}</td>
+    <td><button class="wk-action-btn" onclick="restoreOrderUI(${jsq(o.id)})">Восстановить</button></td>
+  </tr>`).join('');
+  return `<details style="margin-top:18px"><summary class="orders-section-lbl" style="cursor:pointer">🗄 Архив заказов (${archivedOrders.length})</summary>
+    <table class="dt"><thead><tr><th>Статус</th><th>Заказ</th><th>Клиент</th><th>Даты</th><th></th></tr></thead><tbody>${rows}</tbody></table></details>`;
 }
 
 // ══════════════════════════════════════════
 // SCHEDULE / HEATMAP
 // ══════════════════════════════════════════
-function setPeriodH(d,el){ hPeriod=d; document.querySelectorAll('#tab-schedule .pbtn').forEach(b=>b.classList.remove('active')); el.classList.add('active'); renderSchedule(); }
+function setPeriodH(d,el){ hPeriod=d; document.querySelectorAll('#tab-schedule .pbtn').forEach(b=>b.classList.remove('active')); el.classList.add('active'); loadData(); }
 
 function getHeatVisits(){
-  const cutoffISO=fmtMsk(new Date(mskNow().getTime()-hPeriod*864e5));
+  const cutoffISO=periodStartISO(hPeriod);
   return allVisits.filter(v=>v.dateISO>=cutoffISO && v.hour!=null);
 }
 
@@ -875,10 +933,10 @@ function renderInsights(data){
 }
 
 function renderHeatmap(data){
-  const HOURS=Array.from({length:16},(_,i)=>i+8);
+  const HOURS=Array.from({length:24},(_,i)=>i);
   const grid=Array(7).fill(null).map(()=>Array(24).fill(0));
   const dc=Array(7).fill(0);
-  data.forEach(v=>{ const wd=v.wd; if(v.hour>=8&&v.hour<=23){ grid[wd][v.hour]++; } dc[wd]++; });
+  data.forEach(v=>{ const wd=v.wd; if(v.hour>=0&&v.hour<=23){ grid[wd][v.hour]++; } dc[wd]++; });
   const norm=grid.map((row,wd)=>row.map(c=>dc[wd]?c/dc[wd]*100:0));
   const mx=Math.max(...norm.flat());
   const color=v=>{ if(!v)return{bg:'#f5f5f3',c:'#ddd'}; const r=v/mx; if(r>=.85)return{bg:'#E74C3C',c:'#fff'}; if(r>=.6)return{bg:'#FF6B35',c:'#fff'}; if(r>=.35)return{bg:'#F5C518',c:'#333'}; if(r>=.15)return{bg:'rgba(245,197,24,.35)',c:'#555'}; return{bg:'rgba(245,197,24,.1)',c:'#aaa'}; };
@@ -895,9 +953,9 @@ function renderHeatmap(data){
 }
 
 function renderHourlyCharts(data){
-  const H=Array.from({length:16},(_,i)=>i+8);
+  const H=Array.from({length:24},(_,i)=>i);
   const tot=Array(24).fill(0),bT={client:Array(24).fill(0),yandex:Array(24).fill(0),our:Array(24).fill(0)};
-  data.forEach(v=>{ if(v.hour>=8&&v.hour<=23){ tot[v.hour]++; if(bT[v.visitor]) bT[v.visitor][v.hour]++; } });
+  data.forEach(v=>{ if(v.hour>=0&&v.hour<=23){ const count=v.ordersArr?.filter(o=>o.id&&o.id!=='__other__').length||1; tot[v.hour]+=count; if(bT[v.visitor]) bT[v.visitor][v.hour]+=count; } });
   const lbls=H.map(h=>`${String(h).padStart(2,'0')}:00`);
   dc('chHourly');
   charts['chHourly']=new Chart(document.getElementById('chHourly'),{type:'bar',data:{labels:lbls,datasets:[{data:H.map(h=>tot[h]),backgroundColor:H.map(h=>tot[h]===Math.max(...H.map(hh=>tot[hh]))?'rgba(231,76,60,.85)':'rgba(245,197,24,.75)'),borderRadius:3}]},options:{responsive:true,plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{font:{family:'Montserrat',size:9},maxRotation:45}},y:{grid:{color:'#f0f0f0'},ticks:{font:{family:'Montserrat',size:10}},beginAtZero:true}}}});
@@ -911,9 +969,8 @@ function renderHourlyCharts(data){
 function setPeriod(d,el){
   statsPeriod=d;
   document.querySelectorAll('#tab-stats .pbtn').forEach(b=>b.classList.remove('active')); el.classList.add('active');
-  const to=new Date(), fr=new Date(); fr.setDate(fr.getDate()-d+1);
-  document.getElementById('dateFrom').value=fmt(fr); document.getElementById('dateTo').value=fmt(to);
-  renderStats();
+  document.getElementById('dateFrom').value=periodStartISO(d); document.getElementById('dateTo').value=todayMsk();
+  loadData();
 }
 
 function getStatVisits(){
@@ -930,22 +987,20 @@ function renderStats(){
   document.getElementById('sv-workers').textContent=new Set(data.map(v=>v.worker)).size;
   // orders
   const allOrds=data.flatMap(v=>v.ordersArr.filter(o=>o.id&&o.id!=='__other__'));
-  const issuedO=data.filter(v=>['issue','pickup','both'].includes(v.operation)).flatMap(v=>v.ordersArr.filter(o=>o.id&&o.id!=='__other__'));
-  const returnO=data.filter(v=>['return','dropoff','both'].includes(v.operation)).flatMap(v=>v.ordersArr.filter(o=>o.id&&o.id!=='__other__'));
+  const issuedO=data.flatMap(v=>v.ordersArr.filter(o=>o.id&&o.id!=='__other__'&&['issue','both'].includes(orderOperation(v,o))));
+  const returnO=data.flatMap(v=>v.ordersArr.filter(o=>o.id&&o.id!=='__other__'&&['return','both'].includes(orderOperation(v,o))));
   document.getElementById('so-total').textContent=allOrds.length;
   document.getElementById('so-issued').textContent=issuedO.length;
   document.getElementById('so-returned').textContent=returnO.length;
   document.getElementById('so-avg').textContent=data.length?(Math.round(allOrds.length/data.length*10)/10):0;
 
   renderTimeline(data); renderWeekday(data); renderMonthly(data); renderPie(data); renderDNType(data);
-  if(document.getElementById('rfts')) document.getElementById('rfts').textContent='Обновлено '+new Date().toLocaleTimeString('ru',{hour:'2-digit',minute:'2-digit',timeZone:'Europe/Moscow'})+' МСК';
 }
 
 function dateLabels(){
   const fr=new Date(document.getElementById('dateFrom').value), to=new Date(document.getElementById('dateTo').value);
   const lbls=[]; const c=new Date(fr);
   while(c<=to){ lbls.push(fmt(c)); c.setDate(c.getDate()+1); }
-  if(lbls.length>60) return lbls.filter((_,i)=>i%7===0);
   return lbls;
 }
 
@@ -1005,7 +1060,7 @@ function renderDNType(data){
 // ══════════════════════════════════════════
 // WORKERS
 // ══════════════════════════════════════════
-function setPeriodW(d,el){ wPeriod=d; document.querySelectorAll('#tab-workers .pbtn').forEach(b=>b.classList.remove('active')); el.classList.add('active'); renderWorkers(); }
+function setPeriodW(d,el){ wPeriod=d; document.querySelectorAll('#tab-workers .pbtn').forEach(b=>b.classList.remove('active')); el.classList.add('active'); loadData(); }
 
 let allWorkersDB=[], showArchived=false, wdPeriod=30, currentWorkerDetail='';
 
@@ -1016,7 +1071,9 @@ function toggleArchivedWorkers(btn){
 }
 
 async function loadWorkersDB(){
-  try{ allWorkersDB = await WHApi.getWorkers(); } catch(e){ allWorkersDB=[]; }
+  const rows=await WHApi.getWorkers();
+  allWorkersDB=rows;
+  return rows;
 }
 
 async function addWorkerUI(){
@@ -1034,27 +1091,27 @@ async function addWorkerUI(){
 }
 
 async function archiveWorkerUI(name){
-  showConfirm('Архивировать кладовщика','Убрать <b>'+esc(name)+'</b> в архив? Вся история сохранится.','Архивировать',async()=>{
-    await WHApi.setWorkerActive(name,false);
-    await loadWorkersDB();
-    renderWorkers();
-    showToast('Перемещён в архив');
-  });
+  const ok=await showConfirm('Архивировать кладовщика','Убрать <b>'+esc(name)+'</b> в архив? Вся история сохранится.','Архивировать');
+  if(ok){
+    try{
+      await WHApi.setWorkerActive(name,false);
+      await loadWorkersDB(); renderWorkers(); showToast('Перемещён в архив');
+    }catch(e){showToast('Ошибка: '+(e.message||e));}
+  }
 }
 
 async function restoreWorkerUI(name){
-  await WHApi.setWorkerActive(name,true);
-  await loadWorkersDB();
-  renderWorkers();
-  showToast('Восстановлен');
+  try{
+    await WHApi.setWorkerActive(name,true);
+    await loadWorkersDB(); renderWorkers(); showToast('Восстановлен');
+  }catch(e){showToast('Ошибка: '+(e.message||e));}
 }
 
 function renderWorkers(){
-  const cutoff=new Date(Date.now()-wPeriod*864e5);
-  const cutoffISO=fmtMsk(new Date(mskNow().getTime()-wPeriod*864e5));
+  const cutoffISO=periodStartISO(wPeriod);
   const visits=allVisits.filter(v=>v.dateISO>=cutoffISO);
   const wmap={};
-  allShifts.filter(s=>s.shiftStart && new Date(s.shiftStart)>=cutoff).forEach(s=>{
+  allShifts.filter(s=>(shiftDateToISO(s.shiftDate)||(s.shiftStart||'').slice(0,10))>=cutoffISO).forEach(s=>{
     if(!wmap[s.worker]) wmap[s.worker]={visits:0,orders:0,issued:0,returned:0,day:0,night:0,shifts:0};
     wmap[s.worker].shifts++;
   });
@@ -1064,12 +1121,8 @@ function renderWorkers(){
     w.visits++;
     const ords=v.ordersArr.filter(o=>o.id&&o.id!=='__other__');
     w.orders+=ords.length;
-    if(v.operation==='both'){
-      ords.forEach(o=>{ if(['issue','pickup'].includes(o.type))  w.issued++; else if(['return','dropoff'].includes(o.type)) w.returned++; else w.issued++; });
-    } else {
-      if(['issue','pickup'].includes(v.operation)) w.issued+=ords.length;
-      if(['return','dropoff'].includes(v.operation)) w.returned+=ords.length;
-    }
+    w.issued+=ords.filter(o=>['issue','both'].includes(orderOperation(v,o))).length;
+    w.returned+=ords.filter(o=>['return','both'].includes(orderOperation(v,o))).length;
     if(!v.isNight)w.day++; else w.night++;
   });
 
@@ -1129,7 +1182,7 @@ function setWdPeriod(d,el){
   wdPeriod=d;
   document.querySelectorAll('#tab-worker-detail .pbtn').forEach(b=>b.classList.remove('active'));
   el.classList.add('active');
-  renderWorkerDetail(currentWorkerDetail);
+  loadData().then(()=>renderWorkerDetail(currentWorkerDetail));
 }
 
 function openWorkerDetail(name){
@@ -1143,7 +1196,7 @@ function openWorkerDetail(name){
 }
 
 function renderWorkerDetail(name){
-  const cutoffISO=fmtMsk(new Date(mskNow().getTime()-wdPeriod*864e5));
+  const cutoffISO=periodStartISO(wdPeriod);
   const shifts=allShifts.filter(s=>s.worker===name && (shiftDateToISO(s.shiftDate)||(s.shiftStart||'').slice(0,10))>=cutoffISO);
   if(!shifts.length){
     document.getElementById('wdShifts').innerHTML='<div style="text-align:center;padding:40px;color:var(--muted)">Нет смен за период</div>';
@@ -1161,18 +1214,20 @@ function renderWorkerDetail(name){
     const dateLabel=fmtShiftDate(s.shiftDate,s.shiftStart);
     const startT=s.shiftStart?new Date(s.shiftStart).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit',timeZone:'Europe/Moscow'}):'?';
     const endT=s.shiftEnd?new Date(s.shiftEnd).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit',timeZone:'Europe/Moscow'}):'?';
-    const visits=allVisits.filter(v=>v.shiftId===s.id||v.shiftStart===s.shiftStart);
+    const visits=allVisits.filter(v=>v.worker===s.worker&&(v.shiftId===s.id||(!v.shiftId&&v.shiftStart===s.shiftStart)));
     const visitHtml=visits.map(v=>{
       const time=v.time||'—';
       const ords=v.ordersArr||[];
       const ordStr=ords.length
-        ? ords.map(o=>o.id&&o.id!=='__other__'?`<b>${esc(o.id)}</b>`:esc(o.client||'не из списка')).join(', ')
+        ? ords.map(o=>o.id&&o.id!=='__other__'
+          ? `<b>${esc(o.id)}</b> ${opLabel(orderOperation(v,o))}`
+          : `${esc(o.client||'не из списка')} ${opLabel(v.otherOperation||v.operation)}`).join(', ')
         : '—';
       const visitorIcon=v.visitor==='client'?'🧑':v.visitor==='yandex'?'🚕':v.visitor==='our'?'🚛':'—';
       const comment=v.comment?`<div style="font-size:11px;color:var(--muted);margin-top:2px">${esc(v.comment)}</div>`:'';
       return `<div class="wd-visit">
-        <div class="wd-visit-time">${time}</div>
-        <div class="wd-visit-orders">${visitorIcon} ${ordStr} ${opLabel(v.operation)}${comment}</div>
+        <div class="wd-visit-time">${esc(time)}</div>
+        <div class="wd-visit-orders">${visitorIcon} ${ordStr}${!ords.length?opLabel(v.otherOperation||v.operation):''}${comment}</div>
       </div>`;
     }).join('')||'<div style="padding:10px 14px;font-size:12px;color:var(--muted)">Нет визитов</div>';
 
@@ -1191,7 +1246,7 @@ function renderWorkerDetail(name){
 // ══════════════════════════════════════════
 // TIMESHEET (табель часов)
 // ══════════════════════════════════════════
-function setPeriodTS(d,el){ tsPeriod=d; document.querySelectorAll('#tab-timesheet .pbtn').forEach(b=>b.classList.remove('active')); el.classList.add('active'); renderTimesheet(); }
+function setPeriodTS(d,el){ tsPeriod=d; document.querySelectorAll('#tab-timesheet .pbtn').forEach(b=>b.classList.remove('active')); el.classList.add('active'); loadData(); }
 
 function calcShiftHours(s){
   if(!s.shiftStart||!s.shiftEnd) return {total:0,night:0};
@@ -1203,7 +1258,8 @@ function calcShiftHours(s){
   let nightMs=0;
   const cur=new Date(start);
   while(cur<end){
-    const next=new Date(Math.min(cur.getTime()+3600000,end.getTime()));
+    const hourBoundary=new Date(cur); hourBoundary.setUTCMinutes(0,0,0); hourBoundary.setUTCHours(hourBoundary.getUTCHours()+1);
+    const next=new Date(Math.min(hourBoundary.getTime(),end.getTime()));
     const hMsk=(cur.getUTCHours()+MSK_OFFSET)%24;
     if(hMsk>=22||hMsk<9) nightMs+=next-cur;
     cur.setTime(next.getTime());
@@ -1245,7 +1301,7 @@ function fmtRawTime(v){
 }
 
 function renderTimesheet(){
-  const cutoffISO=fmtMsk(new Date(mskNow().getTime()-tsPeriod*864e5));
+  const cutoffISO=periodStartISO(tsPeriod);
   // Фикс: пропускаем смены без shiftStart вместо fallback на new Date()
   const shifts=allShifts.filter(s=>s.shiftStart && shiftDateToISO(s.shiftDate||'')>=cutoffISO);
   const wmap={};
@@ -1301,7 +1357,7 @@ function renderTimesheet(){
     const dayH=Math.round((w.totalH-w.nightH)*10)/10;
     return `<div class="ts-card">
       <div class="ts-card-hdr">
-        <span class="ts-card-name">${name}</span>
+        <span class="ts-card-name">${esc(name)}</span>
         <div class="ts-card-total">
           <span class="ts-card-hours">${w.totalH.toFixed(1)}ч всего</span>
           <span class="ts-card-shifts">${w.shiftCount} ${w.shiftCount===1?'смена':w.shiftCount<5?'смены':'смен'}</span>
@@ -1320,8 +1376,8 @@ function renderTimesheet(){
 }
 
 function exportTimesheet(){
-  const cutoff=new Date(Date.now()-tsPeriod*864e5);
-  const shifts=allShifts.filter(s=>new Date(s.shiftStart||new Date())>=cutoff);
+  const cutoffISO=periodStartISO(tsPeriod);
+  const shifts=allShifts.filter(s=>s.shiftStart&&(shiftDateToISO(s.shiftDate)||(s.shiftStart||'').slice(0,10))>=cutoffISO);
   const rows=shifts.map(s=>{
     const h=calcShiftHours(s);
     const tS=s.shiftStart?new Date(s.shiftStart).toLocaleString('ru',{timeZone:'Europe/Moscow'}):'';
@@ -1337,57 +1393,79 @@ function exportTimesheet(){
 // ══════════════════════════════════════════
 // LOG
 // ══════════════════════════════════════════
-function setPeriodL(d,el){ logPeriod=d; document.querySelectorAll('#tab-log .pbtn').forEach(b=>b.classList.remove('active')); el.classList.add('active'); renderLog(); }
+function setPeriodL(d,el){ logPeriod=d; logVisibleLimit=LOG_PAGE_SIZE; document.querySelectorAll('#tab-log .pbtn').forEach(b=>b.classList.remove('active')); el.classList.add('active'); loadData(); }
 
 function renderLog(){
-  const cutoffISO=fmtMsk(new Date(mskNow().getTime()-logPeriod*864e5));
-  const visits=[...allVisits].filter(v=>v.dateISO>=cutoffISO)
+  const cutoffISO=periodStartISO(logPeriod);
+  const allPeriodVisits=[...allVisits].filter(v=>v.dateISO>=cutoffISO)
     .sort((a,b)=>{
       const ka=(b.dateISO||'')+'_'+(b.time||'').replace(/\D/g,'');
       const kb=(a.dateISO||'')+'_'+(a.time||'').replace(/\D/g,'');
       return ka>kb?1:ka<kb?-1:0;
-    }).slice(0,300);
+    });
+  const visits=allPeriodVisits.slice(0,logVisibleLimit);
   const tbody=document.getElementById('logTbody');
-  if(!visits.length){ tbody.innerHTML='<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--light)">Нет записей</td></tr>'; return; }
+  const pager=document.getElementById('logPager');
+  if(!visits.length){
+    tbody.innerHTML='<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--light)">Нет записей</td></tr>';
+    if(pager) pager.innerHTML='<span>Всего визитов: 0</span>';
+    return;
+  }
   tbody.innerHTML=visits.map(v=>{
     const dStr=new Date((v.dateISO||todayMsk())+'T12:00:00').toLocaleDateString('ru',{day:'numeric',month:'short'});
     // Защитный парсинг: "1899-12-30T..." → форматируем как время UTC (фактически нет смещения в Excel serial)
     const timeDisplay=fmtRawTime(v.time);
     const ords=v.ordersArr.filter(o=>o.id&&o.id!=='__other__'&&o.id!=='(нет в списке)');
-    const hasOther=v.ordersArr.some(o=>o.id==='__other__'||o.id==='(нет в списке)');
+    const hasOther=!!(v.isOther&&v.otherOperation)||v.ordersArr.some(o=>o.id==='__other__'||o.id==='(нет в списке)');
     const ordHtml=ords.length
-      ? ords.map(o=>`<span class="onum" style="font-size:10px">${o.id}</span>${o.client?` <span style="font-size:9px;color:var(--muted)">${o.client}</span>`:''}`).join('<br>')
+      ? ords.map(o=>{
+          const op=orderOperation(v,o);
+          const label=op==='issue'?'Выдача':op==='return'?'Возврат':'⚠️ Уточнить';
+          return `<span class="onum" style="font-size:10px">${esc(o.id)}</span> <span style="font-size:9px;color:var(--muted)">${label}${o.client?' · '+esc(o.client):''}</span>`;
+        }).join('<br>')
         + (hasOther?`<br><span style="font-size:10px;color:#b84a1a">⚠️ Заказ не из списка</span>`:'')
       : hasOther
         ? `<span style="font-size:10px;color:#b84a1a">⚠️ Заказ не из списка</span>`
         : '—';
+    const visitOps=[...new Set(ords.map(o=>orderOperation(v,o)).filter(Boolean))];
+    const operationLabel=visitOps.length>1?'Выдача / Возврат':visitOps.length===1?(OPL[visitOps[0]]||visitOps[0]):(OPL[v.otherOperation||v.operation]||v.otherOperation||v.operation||'—');
     return `<tr>
       <td>${dStr}</td>
-      <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted)">${timeDisplay}</td>
+      <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted)">${esc(timeDisplay)}</td>
       <td><span class="badge ${v.isNight?'night':'day'}">${v.isNight?'Ночь':'День'}</span></td>
-      <td><strong>${v.worker||'—'}</strong></td>
-      <td>${v.visitor?`<span class="badge ${v.visitor}">${VIS[v.visitor]||v.visitor}</span>`:'—'}</td>
-      <td style="font-size:11px;font-weight:600;color:var(--mid)">${OPL[v.operation]||v.operation||'—'}</td>
+      <td><strong>${esc(v.worker||'—')}</strong></td>
+      <td>${v.visitor?`<span class="badge ${esc(v.visitor)}">${esc(VIS[v.visitor]||v.visitor)}</span>`:'—'}</td>
+      <td style="font-size:11px;font-weight:600;color:var(--mid)">${esc(operationLabel)}</td>
       <td>${ordHtml}</td>
       <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted)">${ords.length||(hasOther?'⚠️':'—')}</td>
-      <td style="font-size:11px;color:var(--muted)">${v.comment||'—'}</td>
+      <td style="font-size:11px;color:var(--muted)">${esc(v.comment||'—')}</td>
     </tr>`;
   }).join('');
+  if(pager){
+    const shown=visits.length, total=allPeriodVisits.length;
+    pager.innerHTML=`<span>Показано ${shown} из ${total}</span>${shown<total?'<button class="wk-action-btn" onclick="showMoreLog()">Показать ещё</button>':''}`;
+  }
 }
 
+function showMoreLog(){ logVisibleLimit+=LOG_PAGE_SIZE; renderLog(); }
+
 // Экранирование значения для CSV (— ; кавычки и переводы строк в комментариях)
-function csvEsc(v){ const s=String(v??''); return /[";\n\r]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s; }
+function csvEsc(v){
+  let s=String(v??'');
+  if(/^\s*[=+\-@]/.test(s)) s="'"+s;
+  return /[";\n\r]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+}
 
 function exportCSV(){
-  const cutoffISO=fmtMsk(new Date(mskNow().getTime()-logPeriod*864e5));
+  const cutoffISO=periodStartISO(logPeriod);
   const visits=allVisits.filter(v=>v.dateISO>=cutoffISO);
   const rows=visits.flatMap(v=>{
     const ords=v.ordersArr.filter(o=>o.id&&o.id!=='__other__'&&o.id!=='(нет в списке)');
-    const hasOtherCSV=v.ordersArr.some(o=>o.id==='__other__'||o.id==='(нет в списке)');
-    const baseRow=[new Date((v.dateISO||todayMsk())+'T12:00:00').toLocaleDateString('ru'),v.time||'',v.isNight?'Ночь':'День',v.worker||'',VIS[v.visitor]||v.visitor||'',OPL[v.operation]||v.operation||''];
-    const rows2=ords.map(o=>[...baseRow,o.id,o.client||'',o.returnDate||'',v.comment||'']);
-    if(hasOtherCSV) rows2.push([...baseRow,'(нет в списке)','','',v.comment||'']);
-    if(!rows2.length) rows2.push([...baseRow,'','','',v.comment||'']);
+    const hasOtherCSV=!!(v.isOther&&v.otherOperation)||v.ordersArr.some(o=>o.id==='__other__'||o.id==='(нет в списке)');
+    const baseRow=[new Date((v.dateISO||todayMsk())+'T12:00:00').toLocaleDateString('ru'),v.time||'',v.isNight?'Ночь':'День',v.worker||'',VIS[v.visitor]||v.visitor||''];
+    const rows2=ords.map(o=>[...baseRow,OPL[orderOperation(v,o)]||orderOperation(v,o)||'Требует сверки',o.id,o.client||'',o.returnDate||'',v.comment||'']);
+    if(hasOtherCSV) rows2.push([...baseRow,OPL[v.otherOperation||v.operation]||v.otherOperation||v.operation||'','(нет в списке)','','',v.comment||'']);
+    if(!rows2.length) rows2.push([...baseRow,OPL[v.operation]||v.operation||'','','','',v.comment||'']);
     return rows2;
   });
   const csv=[['Дата','Время визита (МСК)','Сутки','Кладовщик','Кто','Операция','Заказ','Клиент','Дата возврата','Комментарий'],...rows].map(r=>r.map(csvEsc).join(';')).join('\n');
@@ -1404,27 +1482,47 @@ function dc(id){ if(charts[id]){charts[id].destroy();delete charts[id];} }
 // ══════════════════════════════════════════
 // LINK / СВЕРКА
 // ══════════════════════════════════════════
-let unmatchedData = { unmatchedVisits: [], unlistedOrders: [] };
+let unmatchedData = { unmatchedVisits: [], unlistedOrders: [], linkCandidates: [] };
+let unmatchedLoadError = null;
 let currentLinkVisit = null;
 let selectedOrderIds = new Set();
+let selectedOrderOps = new Map();
 
 async function loadUnmatched(){
+  const requestGeneration=++unmatchedGeneration;
   document.getElementById('linkContent').innerHTML=`<div style="text-align:center;padding:40px;color:var(--light)"><div style="font-size:28px;margin-bottom:8px">⏳</div><div>Загрузка...</div></div>`;
   try{
-    unmatchedData=await WHApi.getUnmatched();
-  }catch(e){ unmatchedData={unmatchedVisits:[],unlistedOrders:[]}; }
+    const nextData=await WHApi.getUnmatched();
+    if(requestGeneration!==unmatchedGeneration) return;
+    unmatchedData=nextData;
+    unmatchedLoadError=null;
+  }catch(e){
+    if(requestGeneration!==unmatchedGeneration) return;
+    unmatchedLoadError=e;
+  }
   renderLinkTab();
   updateLinkBadge();
 }
 
 function updateLinkBadge(){
-  const n=unmatchedData.unmatchedVisits?.length||0;
+  const visitsCount=unmatchedData.unmatchedVisits?.length||0;
+  const ordersCount=unmatchedData.unlistedOrders?.length||0;
+  const n=visitsCount+ordersCount;
   const badge=document.getElementById('linkBadge');
   const notif=document.getElementById('linkNotification');
+  if(unmatchedLoadError){
+    badge.style.display='inline';badge.textContent='!';
+    notif.style.display='block';
+    document.getElementById('linkNotifTitle').textContent='Ошибка обновления сверки — показаны предыдущие данные';
+    return;
+  }
   if(n>0){
     badge.style.display='inline'; badge.textContent=n;
     notif.style.display='block';
-    document.getElementById('linkNotifTitle').textContent=`Есть ${n} ${pl(n,'несвязанный визит','несвязанных визита','несвязанных визитов')} — нужна сверка`;
+    const parts=[];
+    if(visitsCount) parts.push(`${visitsCount} ${pl(visitsCount,'несвязанный визит','несвязанных визита','несвязанных визитов')}`);
+    if(ordersCount) parts.push(`${ordersCount} ${pl(ordersCount,'нарушение','нарушения','нарушений')} жизненного цикла`);
+    document.getElementById('linkNotifTitle').textContent='Нужна сверка: '+parts.join(' · ');
   } else {
     badge.style.display='none'; notif.style.display='none';
   }
@@ -1434,18 +1532,22 @@ function renderLinkTab(){
   const visits=unmatchedData.unmatchedVisits||[];
   const orders=unmatchedData.unlistedOrders||[];
   const el=document.getElementById('linkContent');
+  let html='';
 
-  if(!visits.length && !orders.length){
-    el.innerHTML=`<div class="no-unmatched"><div class="no-unmatched-ico">✅</div><div style="font-size:15px;font-weight:700;color:var(--black);margin-bottom:6px">Всё в порядке!</div><div style="font-size:12px">Нет визитов «нет в списке» за последние 7 дней</div></div>`;
-    return;
+  if(unmatchedLoadError){
+    html+=`<div style="background:rgba(231,76,60,.1);border:1px solid #E74C3C;border-radius:10px;padding:16px;color:#c0392b;margin-bottom:16px"><b>Не удалось обновить сверку — ниже показаны предыдущие данные</b><div style="margin-top:5px;font-size:12px">${esc(unmatchedLoadError.message||unmatchedLoadError)}</div><button class="link-btn" style="margin-top:10px" onclick="loadUnmatched()">Повторить</button></div>`;
+    if(!visits.length && !orders.length){el.innerHTML=html;return;}
   }
 
-  let html='';
+  if(!visits.length && !orders.length){
+    el.innerHTML=`<div class="no-unmatched"><div class="no-unmatched-ico">✅</div><div style="font-size:15px;font-weight:700;color:var(--black);margin-bottom:6px">Всё в порядке!</div><div style="font-size:12px">Нет несвязанных визитов и нарушений жизненного цикла</div></div>`;
+    return;
+  }
 
   // Unmatched visits
   if(visits.length){
     html+=`<div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--light);margin-bottom:10px">🔴 Визиты без заказа (${visits.length})</div>`;
-    visits.forEach((v,i)=>{
+    visits.forEach(v=>{
       const opLabel={Выдача:'📦 Выдача','Получение (наш)':'📥 Получение','Получение+Возврат':'🔃 Получ.+Возврат',Возврат:'🔄 Возврат','Возврат (наш)':'📤 Возврат'}[v.operation]||v.operation;
       const visLabel={client:'🧑 Клиент',yandex:'🚕 Яндекс',our:'🚛 Наш курьер'}[v.visitor]||v.visitor;
       // shiftDate может быть "2026-06-12" (ISO) или "12.06.2026" (dd.MM.yyyy) — форматируем
@@ -1454,23 +1556,27 @@ function renderLinkTab(){
       html+=`<div class="visit-card">
         <div class="visit-card-top">
           <div>
-            <div class="visit-card-title">${shiftDateFmt2} · ${timeFmt2||'—'} МСК</div>
-            <div class="visit-card-meta">${v.worker} · ${v.isNight==='Ночь'?'🌙':'☀️'} · ${visLabel} · ${opLabel}</div>
+            <div class="visit-card-title">${esc(shiftDateFmt2)} · ${esc(timeFmt2||'—')} МСК</div>
+            <div class="visit-card-meta">${esc(v.worker)} · ${v.isNight==='Ночь'?'🌙':'☀️'} · ${esc(visLabel)} · ${esc(opLabel)}</div>
           </div>
-          <button class="link-btn" onclick="openLinkModal(${i})">Связать →</button>
+          <button class="link-btn" onclick="openLinkModal(${jsq(v.visitKey)})">Связать →</button>
         </div>
         ${v.comment?`<div class="visit-card-comment">💬 ${esc(v.comment)}</div>`:''}
-        ${v.orders.length?`<div style="margin-top:6px;font-size:11px;color:var(--muted)">Уже привязаны: ${v.orders.map(o=>o.id).join(', ')}</div>`:''}
+        ${(v.orders||[]).length?`<div style="margin-top:6px;font-size:11px;color:var(--muted)">Уже привязаны: ${(v.orders||[]).map(o=>`${esc(o.id)}${o.operation?' ('+esc(OPL[o.operation]||o.operation)+')':' (нужно уточнить)'}`).join(', ')}</div>`:''}
       </div>`;
     });
   }
 
   // Unlisted orders (have no log entry)
   if(orders.length){
-    html+=`<div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--light);margin:20px 0 10px">📋 Заказы без записи в логе (${orders.length})</div>`;
-    html+=`<div class="twrap scroll"><table class="dt"><thead><tr><th>Заказ</th><th>Клиент</th><th>Дата выдачи</th><th>Возврат</th></tr></thead><tbody>`;
+    html+=`<div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--light);margin:20px 0 10px">📋 Нарушения жизненного цикла (${orders.length})</div>`;
+    html+=`<div style="font-size:11px;color:var(--muted);margin-bottom:8px">Показываются пропущенные операции, повторы и возврат, записанный раньше выдачи. Неоднозначные исторические записи автоматически не удаляются.</div>`;
+    html+=`<div class="twrap scroll"><table class="dt"><thead><tr><th>Заказ</th><th>Клиент</th><th>Проблема</th><th>Дата выдачи</th><th>Возврат</th></tr></thead><tbody>`;
     orders.forEach(o=>{
-      html+=`<tr><td><span class="onum">${o.id}</span></td><td><strong>${o.client}</strong></td><td>${o.issueDate||'—'}</td><td>${o.returnDate||'—'}</td></tr>`;
+      const problem={ambiguous_operation:'Неясно: выдача или возврат',missing_issue:'Нет выдачи',missing_return:'Нет возврата',inconsistent:'Возврат без выдачи',duplicate_issue:'Повторная выдача',duplicate_return:'Повторный возврат',return_before_issue:'Возврат раньше выдачи'}[o.category]||o.category||'Требует проверки';
+      const counts=['duplicate_issue','duplicate_return','inconsistent','return_before_issue'].includes(o.category)
+        ?` · выдач ${Number(o.issueCount||0)}, возвратов ${Number(o.returnCount||0)}`:'';
+      html+=`<tr><td><span class="onum">${esc(o.id)}</span></td><td><strong>${esc(o.client)}</strong></td><td>${esc(problem+counts)}</td><td>${esc(o.issueDate||'—')}</td><td>${esc(o.returnDate||'—')}</td></tr>`;
     });
     html+=`</tbody></table></div>`;
   }
@@ -1478,34 +1584,62 @@ function renderLinkTab(){
   el.innerHTML=html;
 }
 
-function openLinkModal(visitIdx){
-  currentLinkVisit=unmatchedData.unmatchedVisits[visitIdx];
+function normalizeLinkOperation(op){
+  if(['issue','pickup','Выдача','Получение (наш)'].includes(op)) return 'issue';
+  if(['return','dropoff','Возврат','Возврат (наш)'].includes(op)) return 'return';
+  if(['both','Выдача и возврат','Получение+Возврат'].includes(op)) return 'both';
+  return null;
+}
+
+function openLinkModal(visitKey){
+  currentLinkVisit=(unmatchedData.unmatchedVisits||[]).find(v=>v.visitKey===visitKey);
+  if(!currentLinkVisit){showToast('Визит уже изменился — обновите сверку');loadUnmatched();return;}
   selectedOrderIds=new Set();
-  const orders=unmatchedData.unlistedOrders||[];
+  selectedOrderOps=new Map();
+  const orders=unmatchedData.linkCandidates||[];
   const v=currentLinkVisit;
+  const visitOp=normalizeLinkOperation(v.operation);
 
   document.getElementById('linkModalVisitInfo').textContent=
     `${v.shiftDate} · ${v.time} МСК · ${v.worker} · ${v.operation}${v.comment?' · «'+v.comment+'»':''}`;
 
-  const issueOrders  = orders.filter(o => o.orderType !== 'return');
-  const returnOrders = orders.filter(o => o.orderType === 'return');
+  const compatibleOrders=orders.filter(o=>{
+    if(!['issue','return'].includes(o.orderType)) return false;
+    // Не угадываем операцию старого смешанного визита. Такие заказы остаются
+    // только в отчёте сверки до отдельного ручного correction workflow.
+    if(o.ambiguous) return false;
+    if(visitOp==='both') return true;
+    if(visitOp==='issue') return o.orderType==='issue';
+    if(visitOp==='return') return o.orderType==='return';
+    return false;
+  });
+  const issueOrders  = compatibleOrders.filter(o => o.orderType !== 'return');
+  const returnOrders = compatibleOrders.filter(o => o.orderType === 'return');
   const orderRowHtml = o => {
     const badge = o.orderType === 'return'
       ? `<span style="font-size:9px;font-weight:700;color:#1a6fa0;background:rgba(61,155,233,.12);padding:2px 6px;border-radius:4px;margin-left:6px">🔄 к возврату</span>`
       : `<span style="font-size:9px;font-weight:700;color:#1a8a4a;background:rgba(46,204,113,.12);padding:2px 6px;border-radius:4px;margin-left:6px">📦 к выдаче</span>`;
+    const reviewBadge=o.ambiguous
+      ? `<span style="font-size:9px;font-weight:700;color:#b06b00;background:rgba(243,156,18,.12);padding:2px 6px;border-radius:4px;margin-left:6px">⚠️ историческая запись</span>`:'';
     const dateLbl = o.orderType === 'return'
       ? (o.returnDate ? ' · возврат ' + o.returnDate : '')
       : (o.issueDate  ? ' · выдача '  + o.issueDate  : '');
-    return `<div class="order-check-row" id="row-${o.id}" onclick="selectOrder('${o.id}')">
+    // Даже для смешанного визита следующая допустимая операция уже однозначно
+    // следует из полной истории заказа. Не предлагаем действие, которое RPC
+    // всё равно обязан отклонить.
+    const defaultOp=o.orderType;
+    const controls='';
+    return `<div class="order-check-row" data-order-id="${esc(o.id)}" data-default-op="${defaultOp}" onclick="selectOrder(${jsq(o.id)})">
         <div class="order-radio"></div>
         <div>
-          <div class="order-check-id">${o.id}${badge}</div>
-          <div class="order-check-client">${o.client}${dateLbl}</div>
+          <div class="order-check-id">${esc(o.id)}${badge}${reviewBadge}</div>
+          <div class="order-check-client">${esc(o.client)}${esc(dateLbl)}</div>
+          ${controls}
         </div>
       </div>`;
   };
   let ordersHtml = '';
-  if (!orders.length) {
+  if (!compatibleOrders.length) {
     ordersHtml = `<div style="text-align:center;padding:20px;color:var(--light)">Нет подходящих заказов</div>`;
   } else {
     if (issueOrders.length)  ordersHtml += `<div style="font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);padding:8px 0 4px">К выдаче</div>` + issueOrders.map(orderRowHtml).join('');
@@ -1518,16 +1652,27 @@ function openLinkModal(visitIdx){
 }
 
 function selectOrder(id){
-  // Снимаем выбор со всех строк
-  document.querySelectorAll('.order-check-row').forEach(r => r.classList.remove('selected'));
-  selectedOrderIds = new Set([id]);
-  document.getElementById('row-' + id)?.classList.add('selected');
-  document.getElementById('linkConfirmBtn').disabled = false;
+  const row=[...document.querySelectorAll('.order-check-row')].find(r=>r.dataset.orderId===id);
+  if(!row) return;
+  if(selectedOrderIds.has(id)){
+    selectedOrderIds.delete(id);selectedOrderOps.delete(id);row.classList.remove('selected');
+  }else{
+    selectedOrderIds.add(id);selectedOrderOps.set(id,row.dataset.defaultOp);row.classList.add('selected');
+    row.querySelectorAll('.link-op-btn').forEach(btn=>btn.classList.toggle('active',btn.dataset.op===row.dataset.defaultOp));
+  }
+  document.getElementById('linkConfirmBtn').disabled = !selectedOrderIds.size;
+}
+
+function setSelectedOperation(id,op,button){
+  if(!selectedOrderIds.has(id)) selectOrder(id);
+  selectedOrderOps.set(id,op);
+  const row=button.closest('.order-check-row');
+  row.querySelectorAll('.link-op-btn').forEach(btn=>btn.classList.toggle('active',btn.dataset.op===op));
 }
 
 function closeLinkModal(){
   document.getElementById('linkModal').style.display='none';
-  currentLinkVisit=null; selectedOrderIds=new Set();
+  currentLinkVisit=null; selectedOrderIds=new Set(); selectedOrderOps=new Map();
 }
 
 async function confirmLink(){
@@ -1535,18 +1680,24 @@ async function confirmLink(){
   const btn=document.getElementById('linkConfirmBtn');
   btn.textContent='Отправка...'; btn.disabled=true;
   try{
-    const j=await WHApi.linkVisit({visitKey:currentLinkVisit.visitKey,orderIds:[...selectedOrderIds]});
+    const ops={};
+    [...selectedOrderIds].forEach(id=>{ops[id]=selectedOrderOps.get(id);});
+    const j=await WHApi.linkVisit({visitKey:currentLinkVisit.visitKey,orderIds:[...selectedOrderIds],operations:ops});
     if(j.success){
       closeLinkModal();
+      await loadData();
       await loadUnmatched();
+      const successText=j.unresolved
+        ? `✓ Привязано: ${j.linked}. Ещё нужно уточнить заказов: ${j.unresolved}`
+        : `✓ Связано успешно! Привязано заказов: ${j.linked}`;
       document.getElementById('linkContent').insertAdjacentHTML('afterbegin',
-        `<div style="background:rgba(46,204,113,.1);border:1px solid var(--client);border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:13px;font-weight:600;color:#1a8a4a">✓ Связано успешно! Привязано заказов: ${j.linked}</div>`);
+        `<div style="background:rgba(46,204,113,.1);border:1px solid var(--client);border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:13px;font-weight:600;color:#1a8a4a">${successText}</div>`);
     } else {
       alert('Ошибка: '+(j.error||'неизвестная'));
       btn.textContent='✓ Связать'; btn.disabled=false;
     }
   }catch(e){
-    alert('Ошибка соединения');
+    alert('Ошибка: '+(e.message||e));
     btn.textContent='✓ Связать'; btn.disabled=false;
   }
 }
@@ -1584,7 +1735,7 @@ document.addEventListener('click', e => {
 });
 
 // ══════════════════════════════════════════
-// DELETE ORDER
+// ARCHIVE ORDER
 // ══════════════════════════════════════════
 async function deleteOrderUI(orderId, client) {
   const {issued, returned} = getOrderStatuses();
@@ -1597,19 +1748,31 @@ async function deleteOrderUI(orderId, client) {
   else                 statusNote = '<div class="confirm-note">Заказ ещё не выдан — в журнале нет связанных записей.</div>';
 
   const ok = await showConfirm(
-    'Удалить заказ?',
-    `Заказ <strong>${esc(orderId)}</strong>${client ? ' · ' + esc(client) : ''} будет удалён из базы.${statusNote}`,
-    'Удалить'
+    'Убрать заказ в архив?',
+    `Заказ <strong>${esc(orderId)}</strong>${client ? ' · ' + esc(client) : ''} будет скрыт со склада, но его можно восстановить.${statusNote}`,
+    'В архив'
   );
   if (!ok) return;
 
   try {
     await WHApi.deleteOrder(orderId);
     todayOrders = todayOrders.filter(o => o.id !== orderId);
+    archivedOrders.push({id:orderId,client:client||''});
     renderOrders();
-    showToast(`Заказ ${orderId} удалён`);
+    showToast(`Заказ ${orderId} перемещён в архив`);
   } catch(e) {
     showToast('Ошибка: ' + e.message);
+  }
+}
+
+async function restoreOrderUI(orderId){
+  try{
+    await WHApi.restoreOrder(orderId);
+    archivedOrders=archivedOrders.filter(o=>o.id!==orderId);
+    showToast(`Заказ ${orderId} восстановлен`);
+    await loadData();
+  }catch(e){
+    showToast('Ошибка восстановления: '+(e.message||e));
   }
 }
 
@@ -1622,7 +1785,7 @@ async function syncOrdersUI() {
   btn.textContent = '⟳ Синхронизация...';
   try {
     const j = await WHApi.syncOrders();
-    const added = j.added ?? j.upserted ?? '?';
+    const added = j.synced ?? j.added ?? j.upserted ?? '?';
     showToast(`Синхронизировано: ${added} заказов обновлено`);
     await loadData();
   } catch(e) {
