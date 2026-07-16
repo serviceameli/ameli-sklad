@@ -24,32 +24,64 @@ function context(extra = {}) {
   return c;
 }
 
-test('Sheets batch upsert uses one fixed JSON shape for filled and blank dates', () => {
+function orderHeaders() {
+  const h = Array(23).fill('');
+  h[0] = 'Номер заказа';
+  h[2] = 'Получение, дата';
+  h[3] = 'Получение, время';
+  h[4] = 'Возврат, дата';
+  h[5] = 'Возврат, время';
+  h[6] = 'Статус';
+  h[16] = 'Клиент';
+  h[18] = 'Компания';
+  h[22] = 'Работник';
+  return h;
+}
+
+function sheetMatrix(rows) {
+  const width = Math.max(...rows.map(row => row.length));
+  const matrix = rows.map(row => Array.from({ length: width }, (_, i) => row[i] ?? ''));
+  return {
+    getLastRow: () => matrix.length,
+    getLastColumn: () => width,
+    getRange(row, column, rowCount, columnCount) {
+      return { getValues: () => matrix.slice(row - 1, row - 1 + rowCount)
+        .map(values => values.slice(column - 1, column - 1 + columnCount)) };
+    }
+  };
+}
+
+test('Sheets batch upsert uses one fixed JSON shape with blank optional cells', () => {
   const requests = [];
-  const filled = Array(21).fill('');
+  const filled = Array(23).fill('');
   filled[0] = '111';
   filled[2] = new Date('2026-07-15T00:00:00Z');
   filled[4] = new Date('2026-07-17T00:00:00Z');
-  const blank = Array(21).fill('');
-  blank[0] = '222';
-  blank[16] = 'Клиент без дат';
+  filled[16] = 'Первый клиент';
+  filled[18] = 'Компания';
+  filled[22] = 'Курьер';
+  const blankOptional = Array(23).fill('');
+  blankOptional[0] = '222';
+  blankOptional[2] = new Date('2026-07-18T00:00:00Z');
+  blankOptional[4] = new Date('2026-07-19T00:00:00Z');
+  blankOptional[16] = 'Второй клиент';
   const response = { getResponseCode: () => 204, getContentText: () => '' };
   const c = context({
     PropertiesService: { getScriptProperties: () => ({ getProperty: key => key === 'SUPABASE_URL' ? 'https://example.test' : 'key' }) },
-    SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: () => ({
-      getLastRow: () => 3, getLastColumn: () => 21,
-      getRange: () => ({ getValues: () => [filled, blank] })
-    }) }) },
+    SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: () =>
+      sheetMatrix([orderHeaders(), filled, blankOptional]) }) },
     UrlFetchApp: { fetch: (url, options) => { requests.push({ url, options }); return response; } }
   });
 
   assert.equal(c.syncOrders().synced, 2);
   const rows = JSON.parse(requests.find(request => request.options.method === 'post').options.payload);
   assert.deepEqual(Object.keys(rows[0]).sort(), Object.keys(rows[1]).sort());
-  assert.equal(rows[1].issue_date, null);
+  assert.equal(rows[1].issue_date, '2026-07-18');
   assert.equal(rows[1].issue_time, '');
-  assert.equal(rows[1].return_date, null);
+  assert.equal(rows[1].return_date, '2026-07-19');
   assert.equal(rows[1].return_time, '');
+  assert.equal(rows[1].company, '');
+  assert.equal(rows[1].delivery_worker, '');
 });
 
 test('fallback pagination always adds a unique stable order', () => {

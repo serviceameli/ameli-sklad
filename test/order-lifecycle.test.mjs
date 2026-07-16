@@ -27,6 +27,33 @@ function appsContext(extra = {}) {
   return context;
 }
 
+function orderHeaders() {
+  const h = Array(31).fill('');
+  h[0] = 'Номер заказа';
+  h[2] = 'Получение, дата';
+  h[3] = 'Получение, время';
+  h[4] = 'Возврат, дата';
+  h[5] = 'Возврат, время';
+  h[6] = 'Статус';
+  h[16] = 'Клиент';
+  h[18] = 'Компания';
+  h[22] = 'Работник';
+  return h;
+}
+
+function sheetMatrix(rows) {
+  const width = Math.max(...rows.map(row => row.length));
+  const matrix = rows.map(row => Array.from({ length: width }, (_, i) => row[i] ?? ''));
+  return {
+    getLastRow: () => matrix.length,
+    getLastColumn: () => width,
+    getRange(row, column, rowCount, columnCount) {
+      return { getValues: () => matrix.slice(row - 1, row - 1 + rowCount)
+        .map(values => values.slice(column - 1, column - 1 + columnCount)) };
+    }
+  };
+}
+
 function inlineScript(file) {
   const html = read(file);
   return [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)].map(m => m[1]).join('\n');
@@ -127,19 +154,16 @@ test('same-day order advances issue -> return -> done', () => {
 
 test('Sheets sync merges duplicate order rows into one rental', () => {
   const requests = [];
-  const header = Array(31).fill('');
+  const header = orderHeaders();
   const row = (issue, ret, client) => {
     const r = Array(31).fill('');
     r[0] = ' 111 '; r[2] = new Date(issue); r[4] = new Date(ret); r[16] = client; return r;
   };
-  const values = [row('2026-07-15T00:00:00Z','2026-07-16T00:00:00Z','Первый'), row('2026-07-16T00:00:00Z','2026-07-17T00:00:00Z','Последний')];
+  const values = [row('2026-07-15T00:00:00Z','2026-07-16T00:00:00Z','Клиент'), row('2026-07-16T00:00:00Z','2026-07-17T00:00:00Z','Клиент')];
   const response = { getResponseCode: () => 204, getContentText: () => '' };
   const c = appsContext({
     PropertiesService: { getScriptProperties: () => ({ getProperty: k => k === 'SUPABASE_URL' ? 'https://example.test' : 'key' }) },
-    SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: () => ({
-      getLastRow: () => 3, getLastColumn: () => header.length,
-      getRange: () => ({ getValues: () => values })
-    }) }) },
+    SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: () => sheetMatrix([header, ...values]) }) },
     UrlFetchApp: { fetch: (url, options) => { requests.push({url, options}); return response; } }
   });
   const result = c.syncOrders();
@@ -157,27 +181,161 @@ test('Sheets sync merges duplicate order rows into one rental', () => {
   assert.equal(result.duplicateRowsMerged, 1);
 });
 
-test('Sheets sync rejects an invalid date instead of replacing it with today', () => {
-  let fetches = 0;
-  const row = Array(21).fill(''); row[0] = '111'; row[2] = 'not-a-date'; row[4] = new Date('2026-07-17T00:00:00Z');
+test('Sheets sync resolves reordered columns by their headers', () => {
+  const requests = [];
+  const header = ['Объем, м3', 'Работник', 'Клиент', 'Возврат, дата',
+    'Номер заказа', 'Получение, дата', 'Компания', 'Статус',
+    'Возврат, время', 'Получение, время'];
+  const row = [0.5, 'Максим Асадулин', 'Елена Горяйнова', new Date('2026-07-17T00:00:00Z'),
+    '26-A-000772', new Date('2026-07-15T00:00:00Z'), 'sweet william', 'В работе', '18:00', '10:00'];
+  const response = { getResponseCode: () => 204, getContentText: () => '' };
   const c = appsContext({
     PropertiesService: { getScriptProperties: () => ({ getProperty: k => k === 'SUPABASE_URL' ? 'https://example.test' : 'key' }) },
-    SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: () => ({
-      getLastRow: () => 2, getLastColumn: () => row.length, getRange: () => ({ getValues: () => [row] })
-    }) }) },
+    SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: () => sheetMatrix([header, row]) }) },
+    UrlFetchApp: { fetch: (url, options) => { requests.push({url, options}); return response; } }
+  });
+
+  const result = c.syncOrders();
+  const payload = JSON.parse(requests.find(x => x.options.method === 'post').options.payload)[0];
+  assert.equal(result.headerRow, 1);
+  assert.equal(payload.order_no, '26-A-000772');
+  assert.equal(payload.client, 'Елена Горяйнова');
+  assert.equal(payload.delivery_worker, 'Максим Асадулин');
+  assert.equal(payload.company, 'sweet william');
+  assert.equal(payload.issue_date, '2026-07-15');
+  assert.equal(payload.return_date, '2026-07-17');
+  assert.notEqual(payload.client, '0.5');
+});
+
+test('Sheets sync finds headers after preamble rows', () => {
+  const requests = [];
+  const header = orderHeaders();
+  const row = Array(31).fill('');
+  row[0] = '111'; row[2] = '15.07.2026'; row[4] = '17.07.2026';
+  row[16] = 'Анна Иванова';
+  const response = { getResponseCode: () => 204, getContentText: () => '' };
+  const c = appsContext({
+    PropertiesService: { getScriptProperties: () => ({ getProperty: k => k === 'SUPABASE_URL' ? 'https://example.test' : 'key' }) },
+    SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: () => sheetMatrix([
+      ['Экспорт заказов'], ['Номер заказа'], header, row
+    ]) }) },
+    UrlFetchApp: { fetch: (url, options) => { requests.push({url, options}); return response; } }
+  });
+
+  const result = c.syncOrders();
+  assert.equal(result.headerRow, 3);
+  assert.equal(result.synced, 1);
+  const payload = JSON.parse(requests.find(x => x.options.method === 'post').options.payload)[0];
+  assert.deepEqual(payload.raw.sourceRows, [4]);
+});
+
+test('Sheets sync rejects a missing required header before any write', () => {
+  let fetches = 0;
+  const header = orderHeaders();
+  header[22] = '';
+  const row = Array(31).fill('');
+  row[0] = '111'; row[2] = '15.07.2026'; row[4] = '17.07.2026'; row[16] = 'Клиент';
+  const c = appsContext({
+    PropertiesService: { getScriptProperties: () => ({ getProperty: k => k === 'SUPABASE_URL' ? 'https://example.test' : 'key' }) },
+    SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: () => sheetMatrix([header, row]) }) },
+    UrlFetchApp: { fetch: () => { fetches++; throw new Error('must not fetch'); } }
+  });
+  assert.throws(() => c.syncOrders(), /обязательные колонки.*Работник/i);
+  assert.equal(fetches, 0);
+});
+
+test('Sheets sync rejects duplicate normalized headers before any write', () => {
+  let fetches = 0;
+  const header = orderHeaders();
+  header.push('  клиент\u00a0');
+  const row = Array(header.length).fill('');
+  row[0] = '111'; row[2] = '15.07.2026'; row[4] = '17.07.2026'; row[16] = 'Клиент';
+  const c = appsContext({
+    PropertiesService: { getScriptProperties: () => ({ getProperty: k => k === 'SUPABASE_URL' ? 'https://example.test' : 'key' }) },
+    SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: () => sheetMatrix([header, row]) }) },
+    UrlFetchApp: { fetch: () => { fetches++; throw new Error('must not fetch'); } }
+  });
+  assert.throws(() => c.syncOrders(), /Колонки найдены несколько раз.*Клиент/i);
+  assert.equal(fetches, 0);
+});
+
+test('Sheets sync rejects numeric or blank clients before any write', () => {
+  for (const badClient of [0.5, '']) {
+    let fetches = 0;
+    const header = orderHeaders();
+    const row = Array(31).fill('');
+    row[0] = '111'; row[2] = '15.07.2026'; row[4] = '17.07.2026'; row[16] = badClient;
+    const c = appsContext({
+      PropertiesService: { getScriptProperties: () => ({ getProperty: k => k === 'SUPABASE_URL' ? 'https://example.test' : 'key' }) },
+      SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: () => sheetMatrix([header, row]) }) },
+      UrlFetchApp: { fetch: () => { fetches++; throw new Error('must not fetch'); } }
+    });
+    assert.throws(() => c.syncOrders(), /строке 2.*Клиент/i);
+    assert.equal(fetches, 0);
+  }
+});
+
+test('Sheets sync rejects reversed dates and conflicting duplicate clients', () => {
+  const makeContext = rows => {
+    let fetches = 0;
+    const c = appsContext({
+      PropertiesService: { getScriptProperties: () => ({ getProperty: k => k === 'SUPABASE_URL' ? 'https://example.test' : 'key' }) },
+      SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: () => sheetMatrix(rows) }) },
+      UrlFetchApp: { fetch: () => { fetches++; throw new Error('must not fetch'); } }
+    });
+    return { c, getFetches: () => fetches };
+  };
+  const reversed = Array(31).fill('');
+  reversed[0] = '111'; reversed[2] = '18.07.2026'; reversed[4] = '17.07.2026'; reversed[16] = 'Клиент';
+  const first = makeContext([orderHeaders(), reversed]);
+  assert.throws(() => first.c.syncOrders(), /дата выдачи.*позже даты возврата/i);
+  assert.equal(first.getFetches(), 0);
+
+  const duplicate = client => {
+    const row = Array(31).fill('');
+    row[0] = '111'; row[2] = '15.07.2026'; row[4] = '17.07.2026'; row[16] = client;
+    return row;
+  };
+  const second = makeContext([orderHeaders(), duplicate('Анна'), duplicate('Мария')]);
+  assert.throws(() => second.c.syncOrders(), /повторяется с разными клиентами/i);
+  assert.equal(second.getFetches(), 0);
+});
+
+test('Sheets sync rejects an invalid date instead of replacing it with today', () => {
+  let fetches = 0;
+  const header = orderHeaders();
+  const row = Array(31).fill(''); row[0] = '111'; row[2] = 'not-a-date';
+  row[4] = new Date('2026-07-17T00:00:00Z'); row[16] = 'Клиент';
+  const c = appsContext({
+    PropertiesService: { getScriptProperties: () => ({ getProperty: k => k === 'SUPABASE_URL' ? 'https://example.test' : 'key' }) },
+    SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: () => sheetMatrix([header, row]) }) },
     UrlFetchApp: { fetch: () => { fetches++; throw new Error('must not fetch'); } }
   });
   assert.throws(() => c.syncOrders(), /Неверная дата/);
   assert.equal(fetches, 0);
 });
 
-test('Sheets sync rejects an impossible calendar date', () => {
-  const row = Array(21).fill(''); row[0] = '111'; row[2] = '31.02.2026'; row[4] = '17.07.2026';
+test('Sheets sync rejects a zero date before any write', () => {
+  let fetches = 0;
+  const header = orderHeaders();
+  const row = Array(31).fill('');
+  row[0] = '111'; row[2] = 0; row[4] = '17.07.2026'; row[16] = 'Клиент';
   const c = appsContext({
     PropertiesService: { getScriptProperties: () => ({ getProperty: k => k === 'SUPABASE_URL' ? 'https://example.test' : 'key' }) },
-    SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: () => ({
-      getLastRow: () => 2, getLastColumn: () => row.length, getRange: () => ({ getValues: () => [row] })
-    }) }) }
+    SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: () => sheetMatrix([header, row]) }) },
+    UrlFetchApp: { fetch: () => { fetches++; throw new Error('must not fetch'); } }
+  });
+  assert.throws(() => c.syncOrders(), /Неверная дата.*строке 2/i);
+  assert.equal(fetches, 0);
+});
+
+test('Sheets sync rejects an impossible calendar date', () => {
+  const header = orderHeaders();
+  const row = Array(31).fill(''); row[0] = '111'; row[2] = '31.02.2026';
+  row[4] = '17.07.2026'; row[16] = 'Клиент';
+  const c = appsContext({
+    PropertiesService: { getScriptProperties: () => ({ getProperty: k => k === 'SUPABASE_URL' ? 'https://example.test' : 'key' }) },
+    SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: () => sheetMatrix([header, row]) }) }
   });
   assert.throws(() => c.syncOrders(), /Неверная дата/);
 });

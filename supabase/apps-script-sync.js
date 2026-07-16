@@ -227,7 +227,7 @@ function parseDate(val) {
 }
 
 function _sheetDate(val, tz, rowNo, label) {
-  if (!val) return null;
+  if (val == null || String(val).trim() === '') return null;
   var raw = val.toString().trim();
   var dm = raw.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
   var im = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -603,6 +603,134 @@ function _closeShift(cfg, payload) {
 
 // ─── syncOrders: Sheets → Supabase ───────────────────────────
 
+function _normalizeOrderHeader(value) {
+  return String(value == null ? '' : value)
+    .replace(/\u00a0/g, ' ')
+    .trim()
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+    .replace(/\s+/g, ' ')
+    .replace(/\s*,\s*/g, ',')
+    .replace(/[.:;]+$/g, '');
+}
+
+function _orderHeaderSpecs() {
+  return [
+    { key: 'orderNo', label: 'Номер заказа', required: true,
+      aliases: ['номер заказа', '№ заказа', 'заказ №', 'номер заказа №',
+        'номер/№ заказа', 'id заказа', 'order id', 'order no'] },
+    { key: 'issueDate', label: 'Получение, дата', required: true,
+      aliases: ['получение,дата', 'получение дата', 'дата получения',
+        'выдача,дата', 'выдача дата', 'дата выдачи'] },
+    { key: 'issueTime', label: 'Получение, время', required: false,
+      aliases: ['получение,время', 'время получения', 'выдача,время', 'время выдачи'] },
+    { key: 'returnDate', label: 'Возврат, дата', required: true,
+      aliases: ['возврат,дата', 'возврат дата', 'дата возврата'] },
+    { key: 'returnTime', label: 'Возврат, время', required: false,
+      aliases: ['возврат,время', 'время возврата'] },
+    { key: 'siteStatus', label: 'Статус', required: false,
+      aliases: ['статус', 'статус заказа'] },
+    { key: 'client', label: 'Клиент', required: true,
+      aliases: ['клиент', 'имя клиента', 'фио клиента', 'заказчик'] },
+    { key: 'company', label: 'Компания', required: false,
+      aliases: ['компания', 'организация', 'компания клиента'] },
+    { key: 'deliveryWorker', label: 'Работник', required: true,
+      aliases: ['работник', 'работник доставки', 'курьер доставки',
+        'исполнитель доставки'] }
+  ];
+}
+
+function _resolveOrderSheetLayout(headerRows) {
+  var specs = _orderHeaderSpecs();
+  var candidates = [];
+
+  (headerRows || []).forEach(function(values, rowIndex) {
+    var normalized = values.map(_normalizeOrderHeader);
+    var columns = {}, names = {}, duplicates = {}, score = 0;
+    specs.forEach(function(spec) {
+      var aliases = spec.aliases.map(_normalizeOrderHeader);
+      var found = [];
+      normalized.forEach(function(header, columnIndex) {
+        if (header && aliases.indexOf(header) >= 0) found.push(columnIndex);
+      });
+      if (found.length) {
+        score++;
+        columns[spec.key] = found[0];
+        names[spec.key] = String(values[found[0]] == null ? '' : values[found[0]]).trim();
+        if (found.length > 1) duplicates[spec.key] = found.length;
+      }
+    });
+    candidates.push({ headerRow: rowIndex + 1, headers: values, columns: columns,
+      names: names, duplicates: duplicates, score: score });
+  });
+
+  if (!candidates.length) throw new Error('Не удалось прочитать строку заголовков листа «заказы»');
+  var complete = candidates.filter(function(candidate) {
+    return specs.every(function(spec) {
+      return !spec.required || candidate.columns[spec.key] != null;
+    });
+  });
+  if (complete.length > 1) {
+    throw new Error('Найдено несколько строк с полным набором заголовков: ' +
+      complete.map(function(candidate) { return candidate.headerRow; }).join(', ') +
+      '. Оставьте одну строку заголовков; синхронизация отменена.');
+  }
+  var best = complete[0] || candidates.sort(function(a, b) {
+    return b.score - a.score || a.headerRow - b.headerRow;
+  })[0];
+  var missing = specs.filter(function(spec) {
+    return spec.required && best.columns[spec.key] == null;
+  }).map(function(spec) { return '«' + spec.label + '»'; });
+  if (missing.length) {
+    throw new Error('Не найдены обязательные колонки: ' + missing.join(', ') +
+      '. Синхронизация отменена, данные не изменены.');
+  }
+  var ambiguous = specs.filter(function(spec) {
+    return best.duplicates[spec.key];
+  }).map(function(spec) { return '«' + spec.label + '»'; });
+  if (ambiguous.length) {
+    throw new Error('Колонки найдены несколько раз: ' + ambiguous.join(', ') +
+      '. Оставьте по одному заголовку; синхронизация отменена.');
+  }
+  return best;
+}
+
+function _orderCell(row, columnIndex) {
+  return columnIndex == null ? '' : row[columnIndex];
+}
+
+function _orderText(row, columnIndex) {
+  var value = _orderCell(row, columnIndex);
+  return value == null ? '' : String(value).trim();
+}
+
+function _clientText(row, columnIndex, sheetRow) {
+  var value = _orderCell(row, columnIndex);
+  var text = value == null ? '' : String(value).trim();
+  if (text && (typeof value === 'number' || /^[+-]?\d+(?:[.,]\d+)?$/.test(text))) {
+    throw new Error('В строке ' + sheetRow + ' в колонке «Клиент» найдено число «' + text +
+      '». Похоже, столбцы вставлены со смещением; синхронизация отменена.');
+  }
+  return text;
+}
+
+function _requiredOrderValue(value, label, sheetRow) {
+  if (value == null || String(value).trim() === '') {
+    throw new Error('В строке ' + sheetRow + ' не заполнена колонка «' + label +
+      '». Синхронизация отменена, данные не изменены.');
+  }
+  return value;
+}
+
+function _normalizedOrderText(value) {
+  return String(value == null ? '' : value)
+    .replace(/\u00a0/g, ' ')
+    .trim()
+    .toLowerCase()
+    .replace(/ё/g, 'е')
+    .replace(/\s+/g, ' ');
+}
+
 function syncOrders() {
   var cfg = _cfg();
   if (!cfg.url || !cfg.key) return { ok: false, error: 'Не заданы SUPABASE_URL / SUPABASE_SERVICE_KEY' };
@@ -612,20 +740,45 @@ function syncOrders() {
   try {
     var ss    = SpreadsheetApp.getActiveSpreadsheet();
     var sheet = ss.getSheetByName('заказы');
-    if (!sheet || sheet.getLastRow() < 2) return { ok: true, synced: 0 };
+    if (!sheet) {
+      throw new Error('Лист «заказы» не найден. Синхронизация отменена, данные не изменены.');
+    }
+
+    var lastRow = sheet.getLastRow();
+    var lastColumn = sheet.getLastColumn();
+    if (lastRow < 1 || lastColumn < 1) {
+      throw new Error('Лист «заказы» пуст. Синхронизация отменена, данные не изменены.');
+    }
+    var headerScan = sheet.getRange(1, 1, Math.min(lastRow, 10), lastColumn).getValues();
+    var layout = _resolveOrderSheetLayout(headerScan);
+    if (lastRow <= layout.headerRow) return { ok: true, synced: 0, headerRow: layout.headerRow };
 
     var tz = 'Europe/Moscow';
-    var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
-    var sourceRows = data.filter(function(r) { return r[0]; });
+    var data = sheet.getRange(layout.headerRow + 1, 1,
+      lastRow - layout.headerRow, lastColumn).getValues();
+    var sourceRows = data.filter(function(r) {
+      return _orderText(r, layout.columns.orderNo);
+    });
     var grouped = {};
     data.forEach(function(r, idx) {
-      if (!r[0]) return;
-      var sheetRow = idx + 2;
-      var orderNo = r[0].toString().trim().toUpperCase().replace(/[–—]/g, '-');
-      var issueDate = _sheetDate(r[2], tz, sheetRow, 'выдача');
-      var returnDate = _sheetDate(r[4], tz, sheetRow, 'возврат');
-      var issueTime = _sheetTime(r[3], tz);
-      var returnTime = _sheetTime(r[5], tz);
+      var rawOrderNo = _orderText(r, layout.columns.orderNo);
+      if (!rawOrderNo) return;
+      var sheetRow = layout.headerRow + idx + 1;
+      var orderNo = rawOrderNo.toUpperCase().replace(/[–—]/g, '-');
+      var client = _clientText(r, layout.columns.client, sheetRow);
+      _requiredOrderValue(client, 'Клиент', sheetRow);
+      var issueDate = _sheetDate(_requiredOrderValue(
+        _orderCell(r, layout.columns.issueDate), 'Получение, дата', sheetRow),
+        tz, sheetRow, 'выдача');
+      var returnDate = _sheetDate(_requiredOrderValue(
+        _orderCell(r, layout.columns.returnDate), 'Возврат, дата', sheetRow),
+        tz, sheetRow, 'возврат');
+      if (issueDate > returnDate) {
+        throw new Error('В строке ' + sheetRow + ' дата выдачи ' + issueDate +
+          ' позже даты возврата ' + returnDate + '. Синхронизация отменена.');
+      }
+      var issueTime = _sheetTime(_orderCell(r, layout.columns.issueTime), tz);
+      var returnTime = _sheetTime(_orderCell(r, layout.columns.returnTime), tz);
       var row = grouped[orderNo] || {
         order_no: orderNo,
         client: '', company: '',
@@ -634,10 +787,21 @@ function syncOrders() {
         delivery_worker: '', site_status: '', raw: null,
         source_row_count: 0, source_active: true, source_rows: []
       };
+      if (row.client && _normalizedOrderText(row.client) !== _normalizedOrderText(client)) {
+        throw new Error('Заказ «' + orderNo + '» повторяется с разными клиентами: «' +
+          row.client + '» и «' + client + '» (строки ' + row.source_rows[0] +
+          ' и ' + sheetRow + '). Синхронизация отменена.');
+      }
+      var deliveryWorker = _orderText(r, layout.columns.deliveryWorker);
+      if (row.delivery_worker && deliveryWorker &&
+          _normalizedOrderText(row.delivery_worker) !== _normalizedOrderText(deliveryWorker)) {
+        throw new Error('Заказ «' + orderNo + '» повторяется с разными работниками доставки: «' +
+          row.delivery_worker + '» и «' + deliveryWorker + '». Синхронизация отменена.');
+      }
       row.source_row_count++;
       row.source_rows.push(sheetRow);
-      row.client = r[16] ? r[16].toString().trim() : row.client || '';
-      row.company = r[18] ? r[18].toString().trim() : row.company || '';
+      row.client = client || row.client || '';
+      row.company = _orderText(r, layout.columns.company) || row.company || '';
       if (issueDate && (!row.issue_date || issueDate < row.issue_date)) {
         row.issue_date = issueDate; row.issue_time = issueTime;
       } else if (issueDate === row.issue_date && !row.issue_time) {
@@ -648,9 +812,9 @@ function syncOrders() {
       } else if (returnDate === row.return_date && !row.return_time) {
         row.return_time = returnTime;
       }
-      row.delivery_worker = r[19] ? r[19].toString().trim() : row.delivery_worker || '';
-      row.site_status = r[6] ? r[6].toString().trim() : row.site_status || '';
-      row.raw = { canonical: r, sourceRows: row.source_rows };
+      row.delivery_worker = deliveryWorker || row.delivery_worker || '';
+      row.site_status = _orderText(r, layout.columns.siteStatus) || row.site_status || '';
+      row.raw = { canonical: r, columns: layout.names, sourceRows: row.source_rows };
       grouped[orderNo] = row;
     });
     if (!sourceRows.length) return { ok: true, synced: 0 };
@@ -685,7 +849,8 @@ function syncOrders() {
     var staleFilter = encodeURIComponent('(source_sync_id.is.null,source_sync_id.neq.' + syncId + ')');
     _sbPatch(cfg, 'orders?or=' + staleFilter, { source_active: false });
     return { ok: true, synced: synced, sourceRows: sourceRows.length,
-             duplicateRowsMerged: sourceRows.length - rows.length };
+             duplicateRowsMerged: sourceRows.length - rows.length,
+             headerRow: layout.headerRow, columns: layout.names };
   } finally {
     if (lock) lock.releaseLock();
   }
