@@ -68,6 +68,7 @@ as $$
 declare
   v_operation text;
   v_event_at timestamp;
+  v_visit_is_correction boolean;
   v_conflict_at timestamp;
   v_has_undated_conflict boolean;
   v_has_prior_issue boolean;
@@ -76,8 +77,9 @@ begin
 
   select
     public.warehouse_effective_operation(v.operation, new.operation),
-    public.warehouse_visit_event_at(v.visit_date, v.visit_time)
-  into v_operation, v_event_at
+    public.warehouse_visit_event_at(v.visit_date, v.visit_time),
+    v.is_correction
+  into v_operation, v_event_at, v_visit_is_correction
   from public.visits v
   where v.id = new.visit_id;
 
@@ -86,6 +88,14 @@ begin
   end if;
 
   if v_operation = 'issue' then
+    if not coalesce(v_visit_is_correction, false)
+       and exists (
+         select 1 from public.orders o
+         where o.order_no = new.order_no and o.manual_hidden = true
+       ) then
+      raise exception 'Order % is hidden; restore it before linking an issue', new.order_no;
+    end if;
+
     select
       min(public.warehouse_visit_event_at(v.visit_date, v.visit_time)),
       coalesce(bool_or(public.warehouse_visit_event_at(v.visit_date, v.visit_time) is null), false)

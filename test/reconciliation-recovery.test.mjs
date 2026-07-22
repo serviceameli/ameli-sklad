@@ -184,6 +184,9 @@ test('ordinary record and link reject chronology conflicts in both directions', 
         ('RECORD-ISSUE-LATE', '2026-07-19', '2026-07-20'),
         ('RECORD-RETURN-EARLY', '2026-07-19', '2026-07-20'),
         ('UNDATED-BASELINE', '2026-07-18', '2026-07-20');
+      insert into public.orders(order_no, issue_date, return_date, manual_hidden) values
+        ('HIDDEN-STALE-ISSUE', '2026-07-19', '2026-07-20', true),
+        ('HIDDEN-OPEN-RETURN', '2026-07-18', '2026-07-20', true);
       insert into public.shifts(id, worker, shift_date, start_at) values
         ('40000000-0000-0000-0000-000000000001', 'Тестовый кладовщик', '2026-07-18', '2026-07-18T06:00:00Z');
       insert into public.visits(id, shift_id, worker, visitor, operation, visit_date, visit_time, is_other, comment) values
@@ -193,7 +196,10 @@ test('ordinary record and link reject chronology conflicts in both directions', 
         ('50000000-0000-0000-0000-000000000004', '40000000-0000-0000-0000-000000000001', 'Тестовый кладовщик', 'client', 'return', '2026-07-19', '09:00', true, ''),
         ('50000000-0000-0000-0000-000000000005', '40000000-0000-0000-0000-000000000001', 'Тестовый кладовщик', 'client', 'return', '2026-07-19', '09:00', false, ''),
         ('50000000-0000-0000-0000-000000000006', '40000000-0000-0000-0000-000000000001', 'Тестовый кладовщик', 'client', 'issue',  '2026-07-20', '09:00', false, ''),
-        ('50000000-0000-0000-0000-000000000007', null, 'Система', null, 'issue', null, null, false, 'Начальное состояние');
+        ('50000000-0000-0000-0000-000000000007', null, 'Система', null, 'issue', null, null, false, 'Начальное состояние'),
+        ('50000000-0000-0000-0000-000000000008', '40000000-0000-0000-0000-000000000001', 'Тестовый кладовщик', 'client', 'issue',  '2026-07-19', '10:00', true, ''),
+        ('50000000-0000-0000-0000-000000000009', '40000000-0000-0000-0000-000000000001', 'Тестовый кладовщик', 'client', 'issue',  '2026-07-18', '10:00', false, ''),
+        ('50000000-0000-0000-0000-000000000010', '40000000-0000-0000-0000-000000000001', 'Тестовый кладовщик', 'client', 'return', '2026-07-20', '10:00', true, '');
       insert into public.visit_orders(visit_id, order_no, operation) values
         ('50000000-0000-0000-0000-000000000001', 'ISSUE-AFTER-RETURN', 'return'),
         ('50000000-0000-0000-0000-000000000002', null, 'issue'),
@@ -201,7 +207,10 @@ test('ordinary record and link reject chronology conflicts in both directions', 
         ('50000000-0000-0000-0000-000000000004', null, 'return'),
         ('50000000-0000-0000-0000-000000000005', 'RECORD-ISSUE-LATE', 'return'),
         ('50000000-0000-0000-0000-000000000006', 'RECORD-RETURN-EARLY', 'issue'),
-        ('50000000-0000-0000-0000-000000000007', 'UNDATED-BASELINE', 'issue');
+        ('50000000-0000-0000-0000-000000000007', 'UNDATED-BASELINE', 'issue'),
+        ('50000000-0000-0000-0000-000000000008', null, 'issue'),
+        ('50000000-0000-0000-0000-000000000009', 'HIDDEN-OPEN-RETURN', 'issue'),
+        ('50000000-0000-0000-0000-000000000010', null, 'return');
     `);
     await db.exec(read('supabase/migrations/202607220001_reconciliation_recovery.sql'));
 
@@ -226,6 +235,18 @@ test('ordinary record and link reject chronology conflicts in both directions', 
       ], ['uuid', 'jsonb']),
       /cannot be returned before issue/
     );
+    await assert.rejects(
+      rpc(db, 'link_warehouse_visit', [
+        '50000000-0000-0000-0000-000000000008',
+        JSON.stringify([{ orderId: 'HIDDEN-STALE-ISSUE', operation: 'issue' }])
+      ], ['uuid', 'jsonb']),
+      /is hidden; restore it before linking an issue/
+    );
+    const hiddenReturn = await rpc(db, 'link_warehouse_visit', [
+      '50000000-0000-0000-0000-000000000010',
+      JSON.stringify([{ orderId: 'HIDDEN-OPEN-RETURN', operation: 'return' }])
+    ], ['uuid', 'jsonb']);
+    assert.equal(hiddenReturn.linked, 1, 'a hidden open rental must still be returnable');
 
     const draft = { worker: 'Тестовый кладовщик', clientShiftId: 'recovery-shift',
       shiftStart: '2026-07-20T06:00:00Z', shiftDate: '2026-07-20', visits: [] };

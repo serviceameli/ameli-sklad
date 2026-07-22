@@ -1888,8 +1888,8 @@ async function confirmManagerCorrection(){
   const expectedVisitDate=shiftDateToISO(reconciliationVisitDate(visit));
   const expectedVisitTime=fmtRawTime(visit.time);
   if(c.correctionMode==='seed_issue_and_link_return' &&
-     `${baselineIssueDate}T${baselineIssueTime}`>=`${expectedVisitDate}T${expectedVisitTime}`){
-    setLinkModalError('Историческая выдача должна быть раньше этого возврата. Проверьте дату и время.');
+     `${baselineIssueDate}T${baselineIssueTime}`>`${expectedVisitDate}T${expectedVisitTime}`){
+    setLinkModalError('Историческая выдача не должна быть позже этого возврата. Проверьте дату и время.');
     return;
   }
   if(!WHApi.applyManagerCorrection){
