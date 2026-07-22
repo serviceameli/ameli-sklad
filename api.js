@@ -210,6 +210,28 @@
       });
   }
 
+  // ── Контролируемая коррекция исторического визита ───────────
+  // Обычный linkVisit намеренно остаётся строгим. Этот action используется
+  // только из вкладки сверки и требует подтверждённые дату выдачи и причину.
+  function applyManagerCorrection(payload) {
+    payload = payload || {};
+    if (!payload.visitId || !payload.orderId || !String(payload.reason || '').trim()) {
+      return Promise.reject(new Error('Укажите визит, заказ и причину исправления'));
+    }
+    return asPost({
+      action: 'applyManagerCorrection',
+      visitId: payload.visitId,
+      orderId: payload.orderId,
+      reason: String(payload.reason).trim(),
+      actor: payload.actor || 'Дашборд руководителя',
+      expectedVisitDate: payload.expectedVisitDate || null,
+      expectedVisitTime: payload.expectedVisitTime || null,
+      baselineIssueDate: payload.baselineIssueDate || null,
+      baselineIssueTime: payload.baselineIssueTime || null,
+      confirmDuplicate: payload.confirmDuplicate === true
+    });
+  }
+
   // ── deleteOrder (дашборд) ─────────────────────────────────────
   function deleteOrder(orderId) {
     return client().from('orders').update({ manual_hidden: true }).eq('order_no', orderId)
@@ -241,7 +263,7 @@
   }
 
   global.WHApi = {
-    getData, getAll, getUnmatched, linkVisit,
+    getData, getAll, getUnmatched, linkVisit, applyManagerCorrection,
     addVisit, deleteVisit, saveDraft, clearDraft, closeShift,
     deleteOrder, restoreOrder, syncOrders, getWorkers, addWorker, setWorkerActive, getWorkerHistory
   };

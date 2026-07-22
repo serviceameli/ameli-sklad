@@ -402,10 +402,13 @@ function _getUnmatched(cfg) {
   return {
     unmatchedVisits: (snapshot.unmatchedVisits || []).map(function(v) {
       return {
-        visitKey: v.visitKey, shiftDate: v.shiftDate || '',
+        visitKey: v.visitKey,
+        visitDate: v.visitDate || '', shiftDate: v.shiftDate || '',
         time: _fmtTime(v.time), worker: v.worker || '',
         isNight: v.isNight || 'День', visitor: v.visitor || '',
         operation: v.operation || '', comment: v.comment || '',
+        suggestedOrderId: v.suggestedOrderId || null,
+        suggestionAmbiguous: v.suggestionAmbiguous === true,
         orders: v.orders || []
       };
     }),
@@ -425,6 +428,14 @@ function _getUnmatched(cfg) {
         orderType: o.orderType || null, ambiguous: o.ambiguous === true,
         unresolvedVisitIds: Array.isArray(o.unresolvedVisitIds) ? o.unresolvedVisitIds : []
       };
+    }),
+    correctionCandidates: (snapshot.correctionCandidates || []).map(function(o) {
+      // Keep the RPC field names intact: the dashboard submits these values
+      // back as optimistic-concurrency data for a manager correction.
+      return _ext(o, {
+        issueDate: _ddmmyyyy(o.issueDate),
+        returnDate: _ddmmyyyy(o.returnDate)
+      });
     })
   };
 }
@@ -577,6 +588,47 @@ function _linkVisit(cfg, payload) {
 }
 
 // ─── saveDraft / clearDraft ───────────────────────────────────
+
+function _correctionTime(value, label, required) {
+  if (value == null || String(value).trim() === '') {
+    if (required) throw new Error(label + ' is required');
+    return null;
+  }
+  var result = _fmtTime(value);
+  if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(result)) {
+    throw new Error('Неверное время «' + label + '»: ' + value);
+  }
+  return result;
+}
+
+function _applyManagerCorrection(cfg, payload) {
+  ['visitId', 'orderId', 'reason', 'actor', 'expectedVisitDate', 'expectedVisitTime'].forEach(function(key) {
+    if (payload[key] == null || String(payload[key]).trim() === '') {
+      throw new Error(key + ' is required');
+    }
+  });
+
+  var baselineDate = payload.baselineIssueDate
+    ? _isoDate(payload.baselineIssueDate, 'дата исторической выдачи') : null;
+  var baselineTime = _correctionTime(payload.baselineIssueTime, 'baselineIssueTime', false);
+  if ((baselineDate && !baselineTime) || (!baselineDate && baselineTime)) {
+    throw new Error('baselineIssueDate and baselineIssueTime must be provided together');
+  }
+
+  return _sbRpc(cfg, 'apply_warehouse_manager_correction', {
+    p_payload: {
+      visitId: String(payload.visitId).trim(),
+      orderId: String(payload.orderId).trim(),
+      reason: String(payload.reason).trim(),
+      actor: String(payload.actor).trim(),
+      expectedVisitDate: _isoDate(payload.expectedVisitDate, 'ожидаемая дата визита'),
+      expectedVisitTime: _correctionTime(payload.expectedVisitTime, 'expectedVisitTime', true),
+      baselineIssueDate: baselineDate,
+      baselineIssueTime: baselineTime,
+      confirmDuplicate: payload.confirmDuplicate === true
+    }
+  });
+}
 
 function _saveDraft(cfg, payload) {
   if (!payload.worker || !payload.shiftStart) throw new Error('worker and shiftStart are required');
@@ -897,7 +949,7 @@ function doPost(e) {
   var action = payload.action || '';
   var result;
   try {
-    if (['addVisit', 'saveDraft', 'clearDraft', 'closeShift', 'deleteVisit', 'linkVisit'].indexOf(action) < 0) {
+    if (['addVisit', 'saveDraft', 'clearDraft', 'closeShift', 'deleteVisit', 'linkVisit', 'applyManagerCorrection'].indexOf(action) < 0) {
       throw new Error('Unknown action: ' + action);
     }
     _requireDataEpoch(payload);
@@ -907,6 +959,7 @@ function doPost(e) {
     else if (action === 'closeShift') result = _closeShift(cfg, payload);
     else if (action === 'deleteVisit')result = _deleteVisit(cfg, payload);
     else if (action === 'linkVisit')  result = _linkVisit(cfg, payload);
+    else if (action === 'applyManagerCorrection') result = _applyManagerCorrection(cfg, payload);
   } catch(err) {
     result = { ok: false, error: err.toString(), retryable: err.retryable === true };
   }
