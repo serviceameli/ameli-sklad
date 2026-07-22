@@ -211,6 +211,22 @@ table.dt tbody tr:last-child td{border-bottom:none}
 .order-check-row.selected .order-radio::after{content:'';width:6px;height:6px;border-radius:50%;background:#fff}
 .order-check-id{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:var(--black)}
 .order-check-client{font-size:11px;color:var(--muted);margin-top:1px}
+.visit-suggestion{margin-top:7px;padding:7px 10px;border-radius:7px;background:rgba(245,197,24,.12);font-size:11px;color:#705c00}
+.visit-suggestion strong{font-family:'JetBrains Mono',monospace;color:var(--black)}
+.link-inline-error{display:none;background:rgba(231,76,60,.1);border:1px solid #E74C3C;border-radius:9px;padding:10px 12px;color:#b52f25;font-size:12px;font-weight:600;margin-bottom:12px}
+.correction-panel{display:none;border:1px solid #e0b814;background:rgba(245,197,24,.08);border-radius:11px;padding:14px;margin:14px 0}
+.correction-title{font-size:12px;font-weight:800;color:var(--black);margin-bottom:5px}
+.correction-copy{font-size:11px;color:var(--mid);line-height:1.45;margin-bottom:10px}
+.correction-field{display:block;margin-top:9px}
+.correction-field>span{display:block;font-size:10px;font-weight:700;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.06em}
+.correction-field input,.correction-field textarea{width:100%;box-sizing:border-box;border:1px solid var(--rule);border-radius:8px;padding:9px 10px;background:#fff;color:var(--black);font:12px 'Montserrat',sans-serif}
+.correction-field textarea{min-height:64px;resize:vertical}
+.correction-datetime{display:grid;grid-template-columns:1.5fr 1fr;gap:8px}
+.correction-check{display:flex;align-items:flex-start;gap:8px;margin-top:10px;font-size:11px;line-height:1.4;color:var(--mid);cursor:pointer}
+.correction-check input{margin-top:2px;flex:0 0 auto}
+.correction-btn{width:100%;margin-top:12px;background:#8a6500;color:#fff;border:0;border-radius:9px;padding:11px 12px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:700;cursor:pointer}
+.correction-btn:disabled{opacity:.45;cursor:not-allowed}
+.exact-order{box-shadow:inset 3px 0 var(--accent);background:rgba(245,197,24,.06)}
 .no-unmatched{text-align:center;padding:48px 20px;color:var(--light)}
 .no-unmatched-ico{font-size:40px;margin-bottom:10px}
 @keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
@@ -518,8 +534,39 @@ table.dt tbody tr:last-child td{border-bottom:none}
   <div style="background:#fff;border-radius:16px 16px 0 0;padding:22px 20px 32px;width:100%;max-width:600px;max-height:80vh;overflow-y:auto;animation:slideUp .2s ease">
     <div style="font-size:16px;font-weight:700;color:var(--black);margin-bottom:4px">Связать визит с заказами</div>
     <div style="font-size:12px;color:var(--muted);margin-bottom:16px" id="linkModalVisitInfo">—</div>
+    <div id="linkModalSuggestion" class="visit-suggestion" style="display:none;margin-bottom:12px"></div>
+    <div id="linkModalError" class="link-inline-error"></div>
     <div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--light);margin-bottom:8px">Выберите заказы для привязки:</div>
     <div id="linkModalOrders" style="max-height:300px;overflow-y:auto;margin-bottom:16px"></div>
+    <div id="linkCorrectionPanel" class="correction-panel">
+      <div class="correction-title">⚠️ Исправление исторической записи</div>
+      <div id="linkCorrectionCopy" class="correction-copy"></div>
+      <div id="linkCorrectionForm">
+        <label class="correction-field">
+          <span>Кто вносит исправление</span>
+          <input id="linkCorrectionActor" maxlength="80" autocomplete="name" placeholder="Имя и фамилия менеджера" oninput="refreshCorrectionButton()">
+        </label>
+        <div id="linkCorrectionBaseline" style="display:none">
+          <div class="correction-datetime">
+            <label class="correction-field"><span>Когда заказ был выдан</span><input id="linkCorrectionIssueDate" type="date" oninput="refreshCorrectionButton()"></label>
+            <label class="correction-field"><span>Время выдачи</span><input id="linkCorrectionIssueTime" type="time" oninput="refreshCorrectionButton()"></label>
+          </div>
+        </div>
+        <label class="correction-field">
+          <span>Причина исправления</span>
+          <textarea id="linkCorrectionReason" maxlength="500" placeholder="Например: возврат записали как «нет в списке» после очистки истории" oninput="refreshCorrectionButton()"></textarea>
+        </label>
+        <label class="correction-check">
+          <input id="linkCorrectionConfirmed" type="checkbox" onchange="refreshCorrectionButton()">
+          <span id="linkCorrectionConfirmText">Я сверил номер заказа, дату и операцию и подтверждаю исправление истории.</span>
+        </label>
+        <label id="linkCorrectionDuplicateRow" class="correction-check" style="display:none">
+          <input id="linkCorrectionDuplicateConfirmed" type="checkbox" onchange="refreshCorrectionButton()">
+          <span>Я вижу несколько несвязанных визитов этого заказа и вручную выбрал именно эту запись. Остальной дубль останется на сверке.</span>
+        </label>
+        <button id="linkCorrectionBtn" class="correction-btn" onclick="confirmManagerCorrection()" disabled>Исправить историю</button>
+      </div>
+    </div>
     <div style="display:flex;gap:10px">
       <button onclick="closeLinkModal()" style="flex:1;background:var(--bg);border:2px solid var(--rule);border-radius:11px;padding:12px;font-family:'Montserrat',sans-serif;font-size:13px;font-weight:700;color:var(--mid);cursor:pointer">Отмена</button>
       <button onclick="confirmLink()" id="linkConfirmBtn" style="flex:2;background:var(--black);border:none;border-radius:11px;padding:12px;font-family:'Montserrat',sans-serif;font-size:13px;font-weight:700;color:#fff;cursor:pointer">✓ Связать</button>
@@ -528,8 +575,8 @@ table.dt tbody tr:last-child td{border-bottom:none}
 </div>
 
 <script src="vendor/supabase.min.js"></script>
-<script src="config.js?v=20260716-headers1"></script>
-<script src="api.js?v=20260716-headers1"></script>
+<script src="config.js?v=20260722-reconciliation1"></script>
+<script src="api.js?v=20260722-reconciliation1"></script>
 <script>
 // ═══════════════
 // URL берётся из файла config.js (лежит рядом с этим файлом)
@@ -1487,6 +1534,44 @@ let unmatchedLoadError = null;
 let currentLinkVisit = null;
 let selectedOrderIds = new Set();
 let selectedOrderOps = new Map();
+let currentCorrectionCandidate = null;
+
+function normalizeSuggestedOrderId(value){
+  const raw=String(value||'').toUpperCase().replace(/\u0410/g,'A').replace(/[\u2012\u2013\u2014\u2212]/g,'-');
+  const match=raw.match(/(?:^|[^0-9])([0-9]{2})\s*-?\s*A\s*-?\s*([0-9]{6})(?:\s*\(\s*F\s*\))?/i);
+  if(!match) return '';
+  const hasF=/\(\s*F\s*\)/i.test(match[0]);
+  return `${match[1]}-A-${match[2]}${hasF?' (F)':''}`;
+}
+
+function suggestedOrderIdForVisit(visit){
+  if(!visit||visit.suggestionAmbiguous) return '';
+  return normalizeSuggestedOrderId(visit.suggestedOrderId)||normalizeSuggestedOrderId(visit.comment);
+}
+
+function orderIdBase(value){
+  return normalizeSuggestedOrderId(value).replace(/\s*\(F\)$/,'');
+}
+
+function sameSuggestedOrder(left,right){
+  const a=orderIdBase(left),b=orderIdBase(right);
+  return !!a&&a===b;
+}
+
+function reconciliationVisitDate(visit){
+  return visit&&((visit.visitDate||'').toString().trim()||(visit.shiftDate||'').toString().trim())||'';
+}
+
+function correctionCandidateForVisit(visit){
+  const candidates=unmatchedData.correctionCandidates||[];
+  const suggested=suggestedOrderIdForVisit(visit);
+  const byVisit=candidates.filter(c=>c.visitKey===visit.visitKey);
+  if(suggested){
+    const exact=byVisit.find(c=>sameSuggestedOrder(c.id,suggested));
+    if(exact) return exact;
+  }
+  return byVisit.length===1?byVisit[0]:null;
+}
 
 async function loadUnmatched(){
   const requestGeneration=++unmatchedGeneration;
@@ -1550,9 +1635,14 @@ function renderLinkTab(){
     visits.forEach(v=>{
       const opLabel={Выдача:'📦 Выдача','Получение (наш)':'📥 Получение','Получение+Возврат':'🔃 Получ.+Возврат',Возврат:'🔄 Возврат','Возврат (наш)':'📤 Возврат'}[v.operation]||v.operation;
       const visLabel={client:'🧑 Клиент',yandex:'🚕 Яндекс',our:'🚛 Наш курьер'}[v.visitor]||v.visitor;
-      // shiftDate может быть "2026-06-12" (ISO) или "12.06.2026" (dd.MM.yyyy) — форматируем
-      const shiftDateFmt2 = fmtShiftDate(v.shiftDate, null) || v.shiftDate;
+      // В длинной смене shiftDate может быть на несколько дней раньше визита.
+      const visitDateRaw=reconciliationVisitDate(v);
+      const shiftDateFmt2 = fmtShiftDate(visitDateRaw, null) || visitDateRaw;
       const timeFmt2 = fmtRawTime(v.time);
+      const suggestedId=suggestedOrderIdForVisit(v);
+      const suggestionHtml=v.suggestionAmbiguous
+        ?`<div class="visit-suggestion">⚠️ В комментарии найдено несколько номеров — нужна ручная проверка.</div>`
+        :(suggestedId?`<div class="visit-suggestion">Возможный заказ: <strong>${esc(suggestedId)}</strong> · проверьте перед связыванием</div>`:'');
       html+=`<div class="visit-card">
         <div class="visit-card-top">
           <div>
@@ -1562,6 +1652,7 @@ function renderLinkTab(){
           <button class="link-btn" onclick="openLinkModal(${jsq(v.visitKey)})">Связать →</button>
         </div>
         ${v.comment?`<div class="visit-card-comment">💬 ${esc(v.comment)}</div>`:''}
+        ${suggestionHtml}
         ${(v.orders||[]).length?`<div style="margin-top:6px;font-size:11px;color:var(--muted)">Уже привязаны: ${(v.orders||[]).map(o=>`${esc(o.id)}${o.operation?' ('+esc(OPL[o.operation]||o.operation)+')':' (нужно уточнить)'}`).join(', ')}</div>`:''}
       </div>`;
     });
@@ -1599,9 +1690,23 @@ function openLinkModal(visitKey){
   const orders=unmatchedData.linkCandidates||[];
   const v=currentLinkVisit;
   const visitOp=normalizeLinkOperation(v.operation);
+  const suggestedId=suggestedOrderIdForVisit(v);
+  const visitDate=reconciliationVisitDate(v);
+  const visitDateLabel=fmtShiftDate(visitDate,null)||visitDate;
 
   document.getElementById('linkModalVisitInfo').textContent=
-    `${v.shiftDate} · ${v.time} МСК · ${v.worker} · ${v.operation}${v.comment?' · «'+v.comment+'»':''}`;
+    `${visitDateLabel} · ${fmtRawTime(v.time)||'—'} МСК · ${v.worker} · ${v.operation}${v.comment?' · «'+v.comment+'»':''}`;
+  const suggestionEl=document.getElementById('linkModalSuggestion');
+  if(v.suggestionAmbiguous){
+    suggestionEl.style.display='block';
+    suggestionEl.textContent='В комментарии найдено несколько номеров. Система не будет угадывать заказ.';
+  }else if(suggestedId){
+    suggestionEl.style.display='block';
+    suggestionEl.innerHTML=`Точная подсказка из комментария: <strong>${esc(suggestedId)}</strong>. Проверьте клиента и даты.`;
+  }else{
+    suggestionEl.style.display='none';suggestionEl.textContent='';
+  }
+  setLinkModalError('');
 
   const compatibleOrders=orders.filter(o=>{
     if(!['issue','return'].includes(o.orderType)) return false;
@@ -1612,10 +1717,13 @@ function openLinkModal(visitKey){
     if(visitOp==='issue') return o.orderType==='issue';
     if(visitOp==='return') return o.orderType==='return';
     return false;
-  });
-  const issueOrders  = compatibleOrders.filter(o => o.orderType !== 'return');
-  const returnOrders = compatibleOrders.filter(o => o.orderType === 'return');
+  }).sort((a,b)=>Number(sameSuggestedOrder(b.id,suggestedId))-Number(sameSuggestedOrder(a.id,suggestedId)));
+  const exactOrders=compatibleOrders.filter(o=>sameSuggestedOrder(o.id,suggestedId));
+  const otherOrders=compatibleOrders.filter(o=>!sameSuggestedOrder(o.id,suggestedId));
+  const issueOrders  = otherOrders.filter(o => o.orderType !== 'return');
+  const returnOrders = otherOrders.filter(o => o.orderType === 'return');
   const orderRowHtml = o => {
+    const isExact=sameSuggestedOrder(o.id,suggestedId);
     const badge = o.orderType === 'return'
       ? `<span style="font-size:9px;font-weight:700;color:#1a6fa0;background:rgba(61,155,233,.12);padding:2px 6px;border-radius:4px;margin-left:6px">🔄 к возврату</span>`
       : `<span style="font-size:9px;font-weight:700;color:#1a8a4a;background:rgba(46,204,113,.12);padding:2px 6px;border-radius:4px;margin-left:6px">📦 к выдаче</span>`;
@@ -1629,10 +1737,11 @@ function openLinkModal(visitKey){
     // всё равно обязан отклонить.
     const defaultOp=o.orderType;
     const controls='';
-    return `<div class="order-check-row" data-order-id="${esc(o.id)}" data-default-op="${defaultOp}" onclick="selectOrder(${jsq(o.id)})">
+    const exactBadge=isExact?`<span style="font-size:9px;font-weight:700;color:#705c00;background:rgba(245,197,24,.18);padding:2px 6px;border-radius:4px;margin-left:6px">★ номер из комментария</span>`:'';
+    return `<div class="order-check-row${isExact?' exact-order':''}" data-order-id="${esc(o.id)}" data-default-op="${defaultOp}" onclick="selectOrder(${jsq(o.id)})">
         <div class="order-radio"></div>
         <div>
-          <div class="order-check-id">${esc(o.id)}${badge}${reviewBadge}</div>
+          <div class="order-check-id">${esc(o.id)}${exactBadge}${badge}${reviewBadge}</div>
           <div class="order-check-client">${esc(o.client)}${esc(dateLbl)}</div>
           ${controls}
         </div>
@@ -1642,13 +1751,75 @@ function openLinkModal(visitKey){
   if (!compatibleOrders.length) {
     ordersHtml = `<div style="text-align:center;padding:20px;color:var(--light)">Нет подходящих заказов</div>`;
   } else {
+    if(exactOrders.length) ordersHtml+=`<div style="font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#705c00;padding:8px 0 4px">Точное совпадение</div>`+exactOrders.map(orderRowHtml).join('');
     if (issueOrders.length)  ordersHtml += `<div style="font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);padding:8px 0 4px">К выдаче</div>` + issueOrders.map(orderRowHtml).join('');
     if (returnOrders.length) ordersHtml += `<div style="font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);padding:8px 0 4px">К возврату</div>` + returnOrders.map(orderRowHtml).join('');
   }
 
   document.getElementById('linkModalOrders').innerHTML=ordersHtml;
+  configureCorrectionPanel(v);
   document.getElementById('linkModal').style.display='flex';
-  document.getElementById('linkConfirmBtn').disabled=true;
+  const linkBtn=document.getElementById('linkConfirmBtn');
+  linkBtn.textContent='✓ Связать';linkBtn.disabled=true;
+}
+
+function setLinkModalError(message){
+  const el=document.getElementById('linkModalError');
+  el.textContent=message||'';
+  el.style.display=message?'block':'none';
+}
+
+function configureCorrectionPanel(visit){
+  currentCorrectionCandidate=correctionCandidateForVisit(visit);
+  const panel=document.getElementById('linkCorrectionPanel');
+  const form=document.getElementById('linkCorrectionForm');
+  if(!currentCorrectionCandidate||visit.suggestionAmbiguous){
+    panel.style.display='none';form.style.display='none';return;
+  }
+  const c=currentCorrectionCandidate;
+  const duplicate=Number(c.duplicateUnmatchedCount||0)>1;
+  const blocked=c.correctionMode==='duplicate_existing_operation'||c.canApply===false;
+  panel.style.display='block';
+  form.style.display=blocked?'none':'block';
+  let copy='';
+  if(c.correctionMode==='duplicate_existing_operation'){
+    copy=`У заказа ${esc(c.id)} уже есть такая операция. Эта запись похожа на дубль: автоматическая привязка отключена. Запись останется в сверке до ручного разбора.`;
+  }else if(c.correctionMode==='restore_before_link'){
+    copy=`Заказ ${esc(c.id)} скрыт. Сначала восстановите его из архива заказов, затем обновите сверку и привяжите выдачу. Данные автоматически не изменяются.`;
+  }else if(c.correctionMode==='chronology_conflict'){
+    copy=`Выдача по заказу ${esc(c.id)} записана позже уже существующего возврата. Автоматическая коррекция заблокирована — проверьте даты в журнале.`;
+  }else if(!c.canApply){
+    copy=`Заказ ${esc(c.id)} найден, но сервер не разрешает коррекцию. Данные не будут изменены.`;
+  }else if(c.correctionMode==='seed_issue_and_link_return'){
+    copy=`Заказ <strong>${esc(c.id)}</strong>${c.client?' · '+esc(c.client):''} скрыт или не имеет выдачи в истории. Исправление атомарно добавит подтверждённую историческую выдачу и свяжет этот возврат.`;
+  }else{
+    copy=`Заказ <strong>${esc(c.id)}</strong>${c.client?' · '+esc(c.client):''} найден точно, но недоступен для обычной привязки${c.manualHidden?' (он скрыт)':''}. Исправление будет записано в аудит.`;
+  }
+  if(duplicate&&!blocked) copy+=` <strong>Найдено несколько визитов с этим номером; остальные не будут изменены.</strong>`;
+  document.getElementById('linkCorrectionCopy').innerHTML=copy;
+  document.getElementById('linkCorrectionBaseline').style.display=c.correctionMode==='seed_issue_and_link_return'?'block':'none';
+  document.getElementById('linkCorrectionIssueDate').value=c.correctionMode==='seed_issue_and_link_return'?(shiftDateToISO(c.issueDate)||''):'';
+  document.getElementById('linkCorrectionIssueTime').value='';
+  document.getElementById('linkCorrectionActor').value=localStorage.getItem('wh_correction_actor')||'';
+  document.getElementById('linkCorrectionReason').value='';
+  document.getElementById('linkCorrectionConfirmed').checked=false;
+  document.getElementById('linkCorrectionDuplicateConfirmed').checked=false;
+  document.getElementById('linkCorrectionDuplicateRow').style.display=duplicate?'flex':'none';
+  refreshCorrectionButton();
+}
+
+function refreshCorrectionButton(){
+  const btn=document.getElementById('linkCorrectionBtn');
+  const c=currentCorrectionCandidate;
+  if(!c||c.canApply===false||c.correctionMode==='duplicate_existing_operation'){btn.disabled=true;return;}
+  const actor=document.getElementById('linkCorrectionActor').value.trim();
+  const reason=document.getElementById('linkCorrectionReason').value.trim();
+  const confirmed=document.getElementById('linkCorrectionConfirmed').checked;
+  const needsBaseline=c.correctionMode==='seed_issue_and_link_return';
+  const baselineOk=!needsBaseline||(document.getElementById('linkCorrectionIssueDate').value&&document.getElementById('linkCorrectionIssueTime').value);
+  const needsDuplicateConfirm=Number(c.duplicateUnmatchedCount||0)>1;
+  const duplicateOk=!needsDuplicateConfirm||document.getElementById('linkCorrectionDuplicateConfirmed').checked;
+  btn.disabled=!(actor.length>=2&&reason.length>=10&&confirmed&&baselineOk&&duplicateOk);
 }
 
 function selectOrder(id){
@@ -1672,12 +1843,14 @@ function setSelectedOperation(id,op,button){
 
 function closeLinkModal(){
   document.getElementById('linkModal').style.display='none';
-  currentLinkVisit=null; selectedOrderIds=new Set(); selectedOrderOps=new Map();
+  setLinkModalError('');
+  currentLinkVisit=null;currentCorrectionCandidate=null;selectedOrderIds=new Set();selectedOrderOps=new Map();
 }
 
 async function confirmLink(){
   if(!currentLinkVisit||!selectedOrderIds.size) return;
   const btn=document.getElementById('linkConfirmBtn');
+  setLinkModalError('');
   btn.textContent='Отправка...'; btn.disabled=true;
   try{
     const ops={};
@@ -1693,12 +1866,62 @@ async function confirmLink(){
       document.getElementById('linkContent').insertAdjacentHTML('afterbegin',
         `<div style="background:rgba(46,204,113,.1);border:1px solid var(--client);border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:13px;font-weight:600;color:#1a8a4a">${successText}</div>`);
     } else {
-      alert('Ошибка: '+(j.error||'неизвестная'));
+      setLinkModalError('Сервер не связал визит: '+(j.error||'неизвестная ошибка'));
       btn.textContent='✓ Связать'; btn.disabled=false;
     }
   }catch(e){
-    alert('Ошибка: '+(e.message||e));
+    setLinkModalError('Не удалось связать визит: '+(e.message||e));
     btn.textContent='✓ Связать'; btn.disabled=false;
+  }
+}
+
+async function confirmManagerCorrection(){
+  const visit=currentLinkVisit,c=currentCorrectionCandidate;
+  if(!visit||!c||c.canApply===false||c.correctionMode==='duplicate_existing_operation') return;
+  refreshCorrectionButton();
+  const btn=document.getElementById('linkCorrectionBtn');
+  if(btn.disabled) return;
+  const actor=document.getElementById('linkCorrectionActor').value.trim();
+  const reason=document.getElementById('linkCorrectionReason').value.trim();
+  const baselineIssueDate=document.getElementById('linkCorrectionIssueDate').value||null;
+  const baselineIssueTime=document.getElementById('linkCorrectionIssueTime').value||null;
+  const expectedVisitDate=shiftDateToISO(reconciliationVisitDate(visit));
+  const expectedVisitTime=fmtRawTime(visit.time);
+  if(c.correctionMode==='seed_issue_and_link_return' &&
+     `${baselineIssueDate}T${baselineIssueTime}`>=`${expectedVisitDate}T${expectedVisitTime}`){
+    setLinkModalError('Историческая выдача должна быть раньше этого возврата. Проверьте дату и время.');
+    return;
+  }
+  if(!WHApi.applyManagerCorrection){
+    setLinkModalError('Сервер ещё не поддерживает безопасную коррекцию. Данные не изменены.');
+    return;
+  }
+  setLinkModalError('');
+  btn.textContent='Исправление...';btn.disabled=true;
+  try{
+    const result=await WHApi.applyManagerCorrection({
+      visitId:visit.visitKey,
+      orderId:c.id,
+      reason,
+      actor,
+      expectedVisitDate,
+      expectedVisitTime,
+      baselineIssueDate:c.correctionMode==='seed_issue_and_link_return'?baselineIssueDate:null,
+      baselineIssueTime:c.correctionMode==='seed_issue_and_link_return'?baselineIssueTime:null,
+      confirmDuplicate:Number(c.duplicateUnmatchedCount||0)>1&&document.getElementById('linkCorrectionDuplicateConfirmed').checked
+    });
+    if(result&&(result.success===false||result.ok===false)) throw new Error(result.error||'сервер отклонил исправление');
+    localStorage.setItem('wh_correction_actor',actor);
+    const correctedOrder=c.id;
+    closeLinkModal();
+    await loadData();
+    await loadUnmatched();
+    document.getElementById('linkContent').insertAdjacentHTML('afterbegin',
+      `<div style="background:rgba(46,204,113,.1);border:1px solid var(--client);border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:13px;font-weight:600;color:#1a8a4a">✓ История заказа ${esc(correctedOrder)} исправлена. Остальные несвязанные записи не изменялись.</div>`);
+  }catch(e){
+    setLinkModalError('Исправление не применено: '+(e.message||e));
+    btn.textContent='Исправить историю';
+    refreshCorrectionButton();
   }
 }
 
