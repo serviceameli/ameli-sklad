@@ -1282,6 +1282,28 @@ test('a hidden issue must be restored before it can be linked', () => {
   assert.match(element('linkCorrectionCopy').innerHTML, /восстановите его из архива/);
 });
 
+test('a six-character correction reason enables the history fix button', () => {
+  const { context, element } = frontendContext('warehouse-dashboard.html', { Chart: class { destroy() {} } });
+  vm.runInContext(`unmatchedData={
+    unmatchedVisits:[{visitKey:'restore',visitDate:'2026-07-19',shiftDate:'2026-07-16',time:'07:24',worker:'Склад',operation:'return',suggestedOrderId:'26-A-002053',orders:[]}],
+    unlistedOrders:[],linkCandidates:[],correctionCandidates:[{
+      visitKey:'restore',id:'26-A-002053',client:'Клиент',issueDate:'18.07.2026',returnDate:'19.07.2026',operation:'return',
+      manualHidden:true,issueCount:0,returnCount:0,duplicateUnmatchedCount:2,correctionMode:'seed_issue_and_link_return',canApply:true
+    }]
+  };`, context);
+  context.openLinkModal('restore');
+  element('linkCorrectionActor').value='Менеджер';
+  element('linkCorrectionIssueTime').value='10:00';
+  element('linkCorrectionConfirmed').checked=true;
+  element('linkCorrectionDuplicateConfirmed').checked=true;
+  element('linkCorrectionReason').value='Сбой!';
+  context.refreshCorrectionButton();
+  assert.equal(element('linkCorrectionBtn').disabled, true);
+  element('linkCorrectionReason').value='Ошибка';
+  context.refreshCorrectionButton();
+  assert.equal(element('linkCorrectionBtn').disabled, false);
+});
+
 test('manager correction keeps the modal open and displays a server error', async () => {
   const { context, element } = frontendContext('warehouse-dashboard.html', { Chart: class { destroy() {} }, WHApi: {
     applyManagerCorrection: async () => { throw new Error('history changed'); }
