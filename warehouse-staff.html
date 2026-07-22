@@ -337,8 +337,8 @@ body{font-family:'Montserrat',sans-serif;background:var(--bg);color:var(--text);
 .oc-status.overdue{background:rgba(231,76,60,.15);color:#c0392b;animation:pulse 2s infinite}
 </style>
   <script src="vendor/supabase.min.js"></script>
-  <script src="config.js?v=20260722-reconciliation1"></script>
-  <script src="api.js?v=20260722-reconciliation1"></script>
+<script src="config.js?v=20260722-duplicate1"></script>
+<script src="api.js?v=20260722-duplicate1"></script>
 </head>
 <body>
 
@@ -652,6 +652,57 @@ let serverReturnedToday = new Set();
 let serverIssuedBy   = {};  // orderId → workerName
 let serverReturnedBy = {};
 let serverOtherVisits = [];  // визиты «не из списка» из лога
+let serverExcludedVisitIds = new Set();
+let serverExcludedClientEventIds = new Set();
+
+function updateExcludedVisitTombstones(data){
+  serverExcludedVisitIds = new Set((data?.excludedVisitIds||[]).map(String));
+  serverExcludedClientEventIds = new Set((data?.excludedClientEventIds||[]).map(String));
+}
+function isExcludedLocalVisit(v,acks){
+  if(!v||typeof v!=='object') return false;
+  const eventId=v.clientEventId?String(v.clientEventId):'';
+  const visitId=v.visitId?String(v.visitId):(eventId&&acks[eventId]?.visitId?String(acks[eventId].visitId):'');
+  return (eventId&&serverExcludedClientEventIds.has(eventId))
+    ||(visitId&&serverExcludedVisitIds.has(visitId));
+}
+function pruneExcludedDraft(draft){
+  if(!draft||!Array.isArray(draft.visits)) return draft;
+  const acks=readVisitAcks();
+  const kept=draft.visits.filter(v=>!isExcludedLocalVisit(v,acks));
+  if(kept.length===draft.visits.length) return draft;
+  return {...draft,visits:kept.map((v,i)=>({...v,n:i+1}))};
+}
+function pruneExcludedPendingVisits(){
+  const acks=readVisitAcks();
+  const pending=readPendingVisits();
+  const kept=[];
+  pending.forEach(payload=>{
+    const eventId=payload.clientEventId?String(payload.clientEventId):'';
+    const visitId=payload.visitId?String(payload.visitId):(eventId&&acks[eventId]?.visitId?String(acks[eventId].visitId):'');
+    if((eventId&&serverExcludedClientEventIds.has(eventId))||(visitId&&serverExcludedVisitIds.has(visitId))){
+      if(eventId) cancelledEvents.add(eventId);
+    }else kept.push(payload);
+  });
+  if(kept.length!==pending.length){
+    pendingMemory=kept;
+    LS.set(PENDING_KEY,JSON.stringify(kept));
+  }
+}
+function pruneExcludedCurrentVisits(){
+  const acks=readVisitAcks();
+  const removed=visits.filter(v=>isExcludedLocalVisit(v,acks));
+  if(!removed.length) return false;
+  removed.forEach(v=>{
+    if(v.clientEventId){cancelledEvents.add(v.clientEventId);removePendingVisit(v.clientEventId);}
+  });
+  visits=visits.filter(v=>!isExcludedLocalVisit(v,acks));
+  visits.forEach((v,i)=>v.n=i+1);
+  const bundle=buildDraftBundle();
+  if(bundle) LS.set(draftKey(),JSON.stringify(bundle.draft));
+  renderTable();updateOrdersBar();renderOrderCards();populateOrders();
+  return true;
+}
 
 // Ключ localStorage зависит от кладовщика — чтобы у каждого своё хранилище
 function draftKey(){ return worker ? 'wh_draft_'+worker.replace(/\s+/g,'_') : 'wh_draft'; }
@@ -761,13 +812,16 @@ function jsq(s){ return esc(String(s??'').replace(/\\/g,'\\\\').replace(/'/g,"\\
 async function init(){
   updatePill(); setInterval(updatePill,60000);
   renderDateLine(); populateDatePicker();
-  flushPendingVisits(); // дослать визиты, не ушедшие в прошлый раз из-за сети
 
   // Проверяем URL-параметр ?worker=Имя
   const urlWorker = new URLSearchParams(location.search).get('worker');
 
   // Один запрос к серверу — с именем кладовщика если есть (чтобы получить его черновик)
   const serverDraft = await loadData(urlWorker || null);
+  // Сначала применяем серверные tombstone-маркеры, и только затем повторяем
+  // офлайн-отправку: отмеченный менеджером дубль не должен воскреснуть.
+  pruneExcludedPendingVisits();
+  flushPendingVisits();
 
   // Если данные не загрузились — показываем экран ошибки с кнопкой «Повторить»
   if(!workers.length && !orders.length){
@@ -790,7 +844,11 @@ async function init(){
       personalWorkerUrl = found.name;
       worker = found.name;
       // Ищем черновик: сначала localStorage, затем с сервера
-      const newestDraft = pickDraftPreservingConflict(LS.get(draftKey()), serverDraft);
+      const localRaw=LS.get(draftKey());
+      let localDraft=null;
+      try{localDraft=localRaw?pruneExcludedDraft(JSON.parse(localRaw)):null;}catch(e){}
+      if(localDraft) LS.set(draftKey(),JSON.stringify(localDraft));
+      const newestDraft = pruneExcludedDraft(pickDraftPreservingConflict(localDraft?JSON.stringify(localDraft):null, serverDraft));
       const draftRaw = newestDraft ? JSON.stringify(newestDraft) : null;
 
       if(draftRaw){
@@ -995,7 +1053,10 @@ async function loadData(workerParam){
     serverIssuedBy   = j.processedOrders?.issuedBy   || {};
     serverReturnedBy = j.processedOrders?.returnedBy || {};
     serverOtherVisits = j.processedOrders?.otherVisits || [];
-    return j.draft || null;
+    updateExcludedVisitTombstones(j);
+    pruneExcludedPendingVisits();
+    pruneExcludedCurrentVisits();
+    return pruneExcludedDraft(j.draft || null);
   }catch(e){
     workers=[]; orders=[];
     window._lastLoadError = e;
@@ -1313,8 +1374,15 @@ async function selWorker(name,el){
     serverIssuedBy=j.processedOrders?.issuedBy||{};
     serverReturnedBy=j.processedOrders?.returnedBy||{};
     serverOtherVisits=j.processedOrders?.otherVisits||[];
+    updateExcludedVisitTombstones(j);
+    pruneExcludedPendingVisits();
+    pruneExcludedCurrentVisits();
+    const localRaw=LS.get(draftKey());
+    if(localRaw){
+      try{LS.set(draftKey(),JSON.stringify(pruneExcludedDraft(JSON.parse(localRaw))));}catch(e){}
+    }
     populateOrders(); updateOrdersBar();
-    startBtn.disabled=checkForDraft(j.draft||null);
+    startBtn.disabled=checkForDraft(pruneExcludedDraft(j.draft||null));
   }catch(e){
     showToast(`⚠️ Не удалось проверить смену: ${e.message||e}`,'#E74C3C');
   }
@@ -1558,7 +1626,10 @@ function otherVisitKey(v){ return v.visitId||v.id||v.clientEventId||`${v.date||'
 
 async function refreshOrdersFromServer(){
   try{
-    const j=await WHApi.getData(personalWorkerUrl || null);
+    const j=await WHApi.getData(personalWorkerUrl || worker || null);
+    updateExcludedVisitTombstones(j);
+    pruneExcludedPendingVisits();
+    pruneExcludedCurrentVisits();
     if(j.orders){
       orders=j.orders;
       serverIssuedToday   = new Set(j.processedOrders?.issued   || []);
@@ -2007,7 +2078,7 @@ function enqueueRestoredVisits(){
   visits.forEach(v=>queuePendingVisit(buildVisitPayload(v),false));
   flushPendingVisits(true).catch(()=>{});
 }
-window.addEventListener('online',()=>{flushPendingVisits().catch(()=>{});});
+window.addEventListener('online',()=>{refreshOrdersFromServer().catch(()=>{});});
 
 // ── TABLE ──
 function renderTable(){

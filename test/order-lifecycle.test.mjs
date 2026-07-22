@@ -379,11 +379,40 @@ test('client API sends a manager correction through the guarded Apps Script acti
   assert.equal(posted.confirmDuplicate, true);
 });
 
-test('both warehouse pages cache-bust the reconciliation API release', () => {
+test('client API marks a duplicate through the guarded Apps Script action', async () => {
+  let posted;
+  const context = {
+    window: {}, SUPABASE_URL: 'https://example.test', SUPABASE_KEY: 'key', SYNC_URL: 'https://script.test',
+    Set, Date, Promise, URLSearchParams, encodeURIComponent,
+    fetch: async (_url, options) => {
+      posted = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ ok: true, data: { ok: true, excluded: true } }) };
+    }
+  };
+  context.window.supabase = { createClient: () => ({ from: () => ({}) }) };
+  vm.createContext(context);
+  vm.runInContext(read('api.js'), context);
+
+  const result = await context.window.WHApi.markVisitDuplicate({
+    visitId: 'visit-duplicate', orderId: '26-A-001944 (F)', reason: 'Ошибка', actor: 'Менеджер',
+    expectedVisitDate: '2026-07-19', expectedVisitTime: '06:56', expectedOperation: 'return', confirmDuplicate: true
+  });
+
+  assert.equal(result.excluded, true);
+  assert.equal(posted.action, 'markVisitDuplicate');
+  assert.equal(posted.expectedOperation, 'return');
+  assert.equal(posted.confirmDuplicate, true);
+  await assert.rejects(context.window.WHApi.markVisitDuplicate({
+    visitId: 'visit-duplicate', orderId: '26-A-001944 (F)', reason: 'Сбой!', actor: 'Менеджер',
+    expectedVisitDate: '2026-07-19', expectedVisitTime: '06:56', expectedOperation: 'return', confirmDuplicate: true
+  }), /причина от 6/);
+});
+
+test('both warehouse pages cache-bust the duplicate-resolution API release', () => {
   for (const file of ['warehouse-staff.html', 'warehouse-dashboard.html']) {
     const html = read(file);
-    assert.match(html, /config\.js\?v=20260722-reconciliation1/);
-    assert.match(html, /api\.js\?v=20260722-reconciliation1/);
+    assert.match(html, /config\.js\?v=20260722-duplicate1/);
+    assert.match(html, /api\.js\?v=20260722-duplicate1/);
   }
 });
 
@@ -532,6 +561,46 @@ test('a restored acknowledged visit is revalidated and a server tombstone remove
   assert.equal(await context.flushPendingVisits(true), true);
   assert.deepEqual(sent, ['visit-deleted']);
   assert.equal(vm.runInContext('visits.length', context), 0);
+});
+
+test('an open staff tab removes only positively tombstoned duplicate visits', async () => {
+  let requestedWorker=null;
+  const shiftStart='2026-07-15T06:00:00.000Z';
+  const draft={worker:'Склад',shiftStart,clientShiftId:'shift-1',savedAt:'2026-07-15T07:00:00.000Z',visits:[
+    {clientEventId:'event-duplicate',visitId:'server-duplicate',visitor:'client',operation:'return',date:'2026-07-15',time:'10:00',orders:[]},
+    {clientEventId:'legacy-local',visitId:'legacy-duplicate',visitor:'client',operation:'return',date:'2026-07-15',time:'10:01',orders:[]},
+    {clientEventId:'acked-local',visitor:'client',operation:'return',date:'2026-07-15',time:'10:02',orders:[]},
+    {clientEventId:'keep-event',visitId:'server-keep',visitor:'client',operation:'issue',date:'2026-07-15',time:'10:03',orders:[]},
+    {visitor:'client',operation:'issue',date:'2026-07-15',time:'10:04',orders:[]}
+  ]};
+  const pending=draft.visits.filter(v=>v.clientEventId).map(v=>({
+    clientEventId:v.clientEventId,worker:'Склад',shiftStart,clientShiftId:'shift-1',entry:{}
+  }));
+  const {context,storage}=frontendContext('warehouse-staff.html',{initialStorage:{
+    wh_data_epoch:'2026-07-14-full-reset-v1',
+    'wh_draft_Склад':JSON.stringify(draft),
+    wh_pending_visits:JSON.stringify(pending),
+    wh_visit_acks:JSON.stringify({'acked-local':{visitId:'acked-duplicate',at:1}})
+  },WHApi:{getData:async workerName=>{requestedWorker=workerName;return ({
+    orders:[],processedOrders:{},draft:null,
+    excludedVisitIds:['server-duplicate','legacy-duplicate','acked-duplicate'],
+    excludedClientEventIds:['event-duplicate']
+  });}}});
+  Object.assign(context,{__noop(){},__flushed:async()=>true});
+  vm.runInContext(`
+    renderTable=__noop;updateOrdersBar=__noop;renderOrderCards=__noop;populateOrders=__noop;flushPendingVisits=__flushed;
+    worker='Склад';personalWorkerUrl=null;shiftStart=new Date(${JSON.stringify(shiftStart)});clientShiftId='shift-1';
+    visits=${JSON.stringify(draft.visits)};
+  `,context);
+
+  await context.refreshOrdersFromServer();
+
+  assert.equal(requestedWorker,'Склад','a shift opened from the shared link still requests its worker tombstones');
+  assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(visits.map(v=>v.clientEventId||null))',context)),['keep-event',null]);
+  assert.deepEqual(Array.from(context.readPendingVisits(),v=>v.clientEventId),['keep-event']);
+  assert.deepEqual(JSON.parse(storage.get('wh_draft_Склад')).visits.map(v=>v.clientEventId||null),['keep-event',null]);
+  assert.equal(JSON.parse(storage.get('wh_visit_acks'))['acked-local'].visitId,'acked-duplicate',
+    'ACK remains as durable local evidence and is not erased');
 });
 
 test('a permanent server error is visible and is not retried forever', async () => {
@@ -1082,7 +1151,10 @@ test('a rejected return stays in the error section and blocks closing', () => {
 });
 
 test('online recovery flushes the whole queue instead of treating the event as a filter', () => {
-  assert.match(read('warehouse-staff.html'), /addEventListener\('online',\(\)=>\{flushPendingVisits\(\)/);
+  const staff=read('warehouse-staff.html');
+  assert.match(staff, /addEventListener\('online',\(\)=>\{refreshOrdersFromServer\(\)/);
+  assert.match(staff, /pruneExcludedPendingVisits\(\);[\s\S]*flushPendingVisits\(\)/,
+    'online recovery must consume positive tombstones before retrying the queue');
 });
 
 test('a blocked visit restored from the draft is not sent again', async () => {
@@ -1248,10 +1320,11 @@ test('reconciliation extracts an order hint and puts its exact candidate first',
   assert.match(element('linkModalSuggestion').innerHTML, /26-A-002053/);
 });
 
-test('an existing-operation duplicate cannot be corrected automatically', async () => {
-  let calls=0;
+test('an existing-operation duplicate requires an audited explicit confirmation', async () => {
+  let correctionCalls=0,duplicatePayload=null;
   const { context, element } = frontendContext('warehouse-dashboard.html', { Chart: class { destroy() {} }, WHApi: {
-    applyManagerCorrection: async () => { calls++; return { success: true }; }
+    applyManagerCorrection: async () => { correctionCalls++; return { success: true }; },
+    markVisitDuplicate: async payload => { duplicatePayload=payload;return { ok:true,excluded:true }; }
   } });
   vm.runInContext(`unmatchedData={
     unmatchedVisits:[{visitKey:'dup',visitDate:'2026-07-19',time:'06:56',worker:'Склад',operation:'return',suggestedOrderId:'26-A-001944',orders:[]}],
@@ -1260,12 +1333,84 @@ test('an existing-operation duplicate cannot be corrected automatically', async 
       duplicateUnmatchedCount:1,correctionMode:'duplicate_existing_operation',canApply:false
     }]
   };`, context);
+  Object.assign(context,{loadData:async()=>{},loadUnmatched:async()=>{}});
   context.openLinkModal('dup');
   assert.equal(element('linkCorrectionPanel').style.display, 'block');
-  assert.equal(element('linkCorrectionForm').style.display, 'none');
-  assert.match(element('linkCorrectionCopy').innerHTML, /дубль/);
-  await context.confirmManagerCorrection();
-  assert.equal(calls, 0);
+  assert.equal(element('linkCorrectionForm').style.display, 'block');
+  assert.match(element('linkCorrectionCopy').innerHTML, /сохранится в базе и аудите/);
+  assert.match(element('linkCorrectionCopy').innerHTML, /не будет участвовать в статистике/);
+  assert.equal(element('linkCorrectionBtn').disabled, true);
+  element('linkCorrectionActor').value='Менеджер';
+  element('linkCorrectionReason').value='Ошибка';
+  context.refreshCorrectionButton();
+  assert.equal(element('linkCorrectionBtn').disabled, true, 'явная галочка обязательна');
+  element('linkCorrectionConfirmed').checked=true;
+  context.refreshCorrectionButton();
+  assert.equal(element('linkCorrectionBtn').disabled, false);
+  await context.confirmCorrectionAction();
+  assert.equal(correctionCalls, 0);
+  assert.equal(duplicatePayload.expectedOperation, 'return');
+  assert.equal(duplicatePayload.confirmDuplicate, true);
+  assert.equal(element('linkModal').style.display, 'none');
+  assert.match(element('linkContent').innerHTML, /исключена из сверки и статистики/);
+});
+
+test('duplicate confirmation cannot be submitted twice while the server request is pending', async () => {
+  let calls=0,resolveRequest;
+  const pending=new Promise(resolve=>{resolveRequest=resolve;});
+  const { context, element } = frontendContext('warehouse-dashboard.html', { Chart: class { destroy() {} }, WHApi: {
+    markVisitDuplicate: async () => {calls++;return pending;}
+  } });
+  vm.runInContext(`unmatchedData={
+    unmatchedVisits:[{visitKey:'dup-pending',visitDate:'2026-07-19',time:'06:56',worker:'Склад',operation:'return',suggestedOrderId:'26-A-001944',orders:[]}],
+    unlistedOrders:[],linkCandidates:[],correctionCandidates:[{
+      visitKey:'dup-pending',id:'26-A-001944 (F)',client:'Клиент',operation:'return',
+      correctionMode:'duplicate_existing_operation',canApply:false
+    }]
+  };`, context);
+  Object.assign(context,{loadData:async()=>{},loadUnmatched:async()=>{}});
+  context.openLinkModal('dup-pending');
+  element('linkCorrectionActor').value='Менеджер';
+  element('linkCorrectionReason').value='Ошибка';
+  element('linkCorrectionConfirmed').checked=true;
+  context.refreshCorrectionButton();
+  const first=context.confirmDuplicateVisit();
+  const second=context.confirmDuplicateVisit();
+  assert.equal(calls,1);
+  assert.equal(element('linkCorrectionBtn').disabled,true);
+  assert.equal(element('linkCancelBtn').disabled,true);
+  context.closeLinkModal();
+  assert.equal(element('linkModal').style.display,'flex','pending response keeps its original modal active');
+  resolveRequest({ok:true,excluded:true});
+  await Promise.all([first,second]);
+  assert.equal(calls,1);
+  assert.equal(element('linkModal').style.display,'none');
+});
+
+test('duplicate server error stays inline and restores one safe retry', async () => {
+  let calls=0;
+  const { context, element } = frontendContext('warehouse-dashboard.html', { Chart: class { destroy() {} }, WHApi: {
+    markVisitDuplicate: async () => {calls++;throw new Error('stale visit');}
+  } });
+  vm.runInContext(`unmatchedData={
+    unmatchedVisits:[{visitKey:'dup-error',visitDate:'2026-07-19',time:'06:56',worker:'Склад',operation:'return',suggestedOrderId:'26-A-001944',orders:[]}],
+    unlistedOrders:[],linkCandidates:[],correctionCandidates:[{
+      visitKey:'dup-error',id:'26-A-001944 (F)',client:'Клиент',operation:'return',
+      correctionMode:'duplicate_existing_operation',canApply:false
+    }]
+  };`, context);
+  context.openLinkModal('dup-error');
+  element('linkCorrectionActor').value='Менеджер';
+  element('linkCorrectionReason').value='Ошибка';
+  element('linkCorrectionConfirmed').checked=true;
+  context.refreshCorrectionButton();
+  await context.confirmDuplicateVisit();
+  assert.equal(calls,1);
+  assert.equal(element('linkModal').style.display,'flex');
+  assert.equal(element('linkModalError').style.display,'block');
+  assert.match(element('linkModalError').textContent,/stale visit/);
+  assert.doesNotMatch(element('linkContent').innerHTML,/отмечен как дубль/);
+  assert.equal(element('linkCorrectionBtn').disabled,false);
 });
 
 test('a hidden issue must be restored before it can be linked', () => {
