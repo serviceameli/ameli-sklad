@@ -232,6 +232,32 @@
     });
   }
 
+  // ─── Подтверждённый дубль визита ──────────────────────────
+  // Запись не удаляется: backend сохраняет её для аудита,
+  // но исключает из операционной статистики и сверки.
+  function markVisitDuplicate(payload) {
+    payload = payload || {};
+    var reason = String(payload.reason || '').trim();
+    var actor = String(payload.actor || '').trim();
+    if (!payload.visitId || !payload.orderId || reason.length < 6 || actor.length < 2 ||
+        !payload.expectedVisitDate || !payload.expectedVisitTime ||
+        ['issue', 'return'].indexOf(payload.expectedOperation) < 0 || payload.confirmDuplicate !== true) {
+      return Promise.reject(new Error('Для отметки дубля нужны менеджер, причина от 6 символов и явное подтверждение'));
+    }
+    return asPost({
+      action: 'markVisitDuplicate',
+      visitId: payload.visitId,
+      orderId: payload.orderId,
+      reason: reason,
+      actor: actor,
+      expectedVisitDate: payload.expectedVisitDate,
+      expectedVisitTime: payload.expectedVisitTime,
+      expectedOperation: payload.expectedOperation,
+      confirmDuplicate: true,
+      originalVisitId: payload.originalVisitId || null
+    });
+  }
+
   // ── deleteOrder (дашборд) ─────────────────────────────────────
   function deleteOrder(orderId) {
     return client().from('orders').update({ manual_hidden: true }).eq('order_no', orderId)
@@ -263,7 +289,7 @@
   }
 
   global.WHApi = {
-    getData, getAll, getUnmatched, linkVisit, applyManagerCorrection,
+    getData, getAll, getUnmatched, linkVisit, applyManagerCorrection, markVisitDuplicate,
     addVisit, deleteVisit, saveDraft, clearDraft, closeShift,
     deleteOrder, restoreOrder, syncOrders, getWorkers, addWorker, setWorkerActive, getWorkerHistory
   };

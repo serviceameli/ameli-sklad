@@ -157,6 +157,23 @@ test('reconciliation backend consumes one snapshot and exposes duplicate counts'
   assert.equal(result.correctionCandidates[0].correctionMode, 'seed_issue_and_link_return');
 });
 
+test('staff backend passes durable duplicate tombstones with safe empty fallbacks', () => {
+  const c = context();
+  c._sbRpc = () => ({
+    workers: [], orders: [], statuses: [], otherRows: [], otherLinks: [], todayEvents: [],
+    excludedVisitIds: ['visit-duplicate', 'visit-legacy'],
+    excludedClientEventIds: ['event-duplicate']
+  });
+  const result = c._getData({}, 'Тестовый кладовщик');
+  assert.deepEqual(result.excludedVisitIds, ['visit-duplicate', 'visit-legacy']);
+  assert.deepEqual(result.excludedClientEventIds, ['event-duplicate']);
+
+  c._sbRpc = () => ({});
+  const fallback = c._getData({}, 'Тестовый кладовщик');
+  assert.deepEqual(Array.from(fallback.excludedVisitIds), []);
+  assert.deepEqual(Array.from(fallback.excludedClientEventIds), []);
+});
+
 test('manager correction sends only the documented payload and returns the RPC result', () => {
   const c = context();
   let call;
@@ -230,6 +247,46 @@ test('manager correction preserves a semantic RPC error for the POST response', 
   assert.equal(thrownEnvelope.ok, false);
   assert.equal(thrownEnvelope.retryable, false);
   assert.match(thrownEnvelope.error, /stale visit/);
+});
+
+test('duplicate marking sends the guarded optimistic payload to one RPC', () => {
+  const c = context();
+  let call;
+  c._sbRpc = (_cfg, name, args) => {
+    call = { name, args };
+    return { ok: true, excluded: true, idempotent: false };
+  };
+  const result = c._markVisitDuplicate({}, {
+    visitId: '62000000-0000-0000-0000-000000000002',
+    orderId: '26-A-001944 (F)',
+    reason: ' Повтор подтверждён ', actor: ' Менеджер ',
+    expectedVisitDate: '19.07.2026', expectedVisitTime: '06:56',
+    expectedOperation: 'dropoff', confirmDuplicate: true,
+    originalVisitId: '62000000-0000-0000-0000-000000000003'
+  });
+
+  assert.equal(result.excluded, true);
+  assert.equal(call.name, 'mark_warehouse_visit_duplicate');
+  assert.deepEqual(JSON.parse(JSON.stringify(call.args.p_payload)), {
+    visitId: '62000000-0000-0000-0000-000000000002',
+    orderId: '26-A-001944 (F)', reason: 'Повтор подтверждён', actor: 'Менеджер',
+    expectedVisitDate: '2026-07-19', expectedVisitTime: '06:56',
+    expectedOperation: 'return', confirmDuplicate: true,
+    originalVisitId: '62000000-0000-0000-0000-000000000003'
+  });
+});
+
+test('duplicate marking rejects weak confirmation before transport', () => {
+  const c = context();
+  const valid = {
+    visitId: 'v1', orderId: '26-A-001944 (F)', reason: 'Повтор подтверждён', actor: 'Менеджер',
+    expectedVisitDate: '2026-07-19', expectedVisitTime: '06:56',
+    expectedOperation: 'return', confirmDuplicate: true
+  };
+  assert.throws(() => c._markVisitDuplicate({}, { ...valid, reason: 'мало' }), /at least 6/);
+  assert.throws(() => c._markVisitDuplicate({}, { ...valid, confirmDuplicate: false }), /confirmDuplicate=true/);
+  assert.throws(() => c._markVisitDuplicate({}, { ...valid, expectedOperation: 'both' }), /issue or return/);
+  assert.throws(() => c._markVisitDuplicate({}, { ...valid, expectedVisitTime: '25:61' }), /Неверное время/);
 });
 
 test('today return counters ignore a historical return without an issue', () => {

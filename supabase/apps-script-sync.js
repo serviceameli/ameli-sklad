@@ -393,7 +393,9 @@ function _getData(cfg, worker) {
                  date: v.visit_date, worker: v.worker, comment: v.comment || '' };
       })
     },
-    draft: snapshot.draft || null
+    draft: snapshot.draft || null,
+    excludedVisitIds: Array.isArray(snapshot.excludedVisitIds) ? snapshot.excludedVisitIds : [],
+    excludedClientEventIds: Array.isArray(snapshot.excludedClientEventIds) ? snapshot.excludedClientEventIds : []
   };
 }
 
@@ -626,6 +628,39 @@ function _applyManagerCorrection(cfg, payload) {
       baselineIssueDate: baselineDate,
       baselineIssueTime: baselineTime,
       confirmDuplicate: payload.confirmDuplicate === true
+    }
+  });
+}
+
+function _markVisitDuplicate(cfg, payload) {
+  ['visitId', 'orderId', 'reason', 'actor', 'expectedVisitDate', 'expectedVisitTime', 'expectedOperation']
+    .forEach(function(key) {
+      if (payload[key] == null || String(payload[key]).trim() === '') {
+        throw new Error(key + ' is required');
+      }
+    });
+  if (String(payload.reason).trim().length < 6) {
+    throw new Error('reason must contain at least 6 characters');
+  }
+  if (payload.confirmDuplicate !== true) {
+    throw new Error('confirmDuplicate=true is required');
+  }
+  var expectedOperation = _normOperation(payload.expectedOperation);
+  if (expectedOperation !== 'issue' && expectedOperation !== 'return') {
+    throw new Error('expectedOperation must be issue or return');
+  }
+
+  return _sbRpc(cfg, 'mark_warehouse_visit_duplicate', {
+    p_payload: {
+      visitId: String(payload.visitId).trim(),
+      orderId: String(payload.orderId).trim(),
+      reason: String(payload.reason).trim(),
+      actor: String(payload.actor).trim(),
+      expectedVisitDate: _isoDate(payload.expectedVisitDate, 'ожидаемая дата визита'),
+      expectedVisitTime: _correctionTime(payload.expectedVisitTime, 'expectedVisitTime', true),
+      expectedOperation: expectedOperation,
+      confirmDuplicate: payload.confirmDuplicate === true,
+      originalVisitId: payload.originalVisitId ? String(payload.originalVisitId).trim() : null
     }
   });
 }
@@ -949,7 +984,7 @@ function doPost(e) {
   var action = payload.action || '';
   var result;
   try {
-    if (['addVisit', 'saveDraft', 'clearDraft', 'closeShift', 'deleteVisit', 'linkVisit', 'applyManagerCorrection'].indexOf(action) < 0) {
+    if (['addVisit', 'saveDraft', 'clearDraft', 'closeShift', 'deleteVisit', 'linkVisit', 'applyManagerCorrection', 'markVisitDuplicate'].indexOf(action) < 0) {
       throw new Error('Unknown action: ' + action);
     }
     _requireDataEpoch(payload);
@@ -960,6 +995,7 @@ function doPost(e) {
     else if (action === 'deleteVisit')result = _deleteVisit(cfg, payload);
     else if (action === 'linkVisit')  result = _linkVisit(cfg, payload);
     else if (action === 'applyManagerCorrection') result = _applyManagerCorrection(cfg, payload);
+    else if (action === 'markVisitDuplicate') result = _markVisitDuplicate(cfg, payload);
   } catch(err) {
     result = { ok: false, error: err.toString(), retryable: err.retryable === true };
   }

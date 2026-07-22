@@ -539,7 +539,7 @@ table.dt tbody tr:last-child td{border-bottom:none}
     <div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--light);margin-bottom:8px">Выберите заказы для привязки:</div>
     <div id="linkModalOrders" style="max-height:300px;overflow-y:auto;margin-bottom:16px"></div>
     <div id="linkCorrectionPanel" class="correction-panel">
-      <div class="correction-title">⚠️ Исправление исторической записи</div>
+      <div class="correction-title" id="linkCorrectionTitle">⚠️ Исправление исторической записи</div>
       <div id="linkCorrectionCopy" class="correction-copy"></div>
       <div id="linkCorrectionForm" oninput="refreshCorrectionButton()" onchange="refreshCorrectionButton()">
         <label class="correction-field">
@@ -564,19 +564,19 @@ table.dt tbody tr:last-child td{border-bottom:none}
           <input id="linkCorrectionDuplicateConfirmed" type="checkbox" onchange="refreshCorrectionButton()">
           <span>Я вижу несколько несвязанных визитов этого заказа и вручную выбрал именно эту запись. Остальной дубль останется на сверке.</span>
         </label>
-        <button id="linkCorrectionBtn" class="correction-btn" onclick="confirmManagerCorrection()" disabled>Исправить историю</button>
+        <button id="linkCorrectionBtn" class="correction-btn" onclick="confirmCorrectionAction()" disabled>Исправить историю</button>
       </div>
     </div>
     <div style="display:flex;gap:10px">
-      <button onclick="closeLinkModal()" style="flex:1;background:var(--bg);border:2px solid var(--rule);border-radius:11px;padding:12px;font-family:'Montserrat',sans-serif;font-size:13px;font-weight:700;color:var(--mid);cursor:pointer">Отмена</button>
+      <button id="linkCancelBtn" onclick="closeLinkModal()" style="flex:1;background:var(--bg);border:2px solid var(--rule);border-radius:11px;padding:12px;font-family:'Montserrat',sans-serif;font-size:13px;font-weight:700;color:var(--mid);cursor:pointer">Отмена</button>
       <button onclick="confirmLink()" id="linkConfirmBtn" style="flex:2;background:var(--black);border:none;border-radius:11px;padding:12px;font-family:'Montserrat',sans-serif;font-size:13px;font-weight:700;color:#fff;cursor:pointer">✓ Связать</button>
     </div>
   </div>
 </div>
 
 <script src="vendor/supabase.min.js"></script>
-<script src="config.js?v=20260722-reconciliation1"></script>
-<script src="api.js?v=20260722-reconciliation1"></script>
+<script src="config.js?v=20260722-duplicate1"></script>
+<script src="api.js?v=20260722-duplicate1"></script>
 <script>
 // ═══════════════
 // URL берётся из файла config.js (лежит рядом с этим файлом)
@@ -1535,6 +1535,7 @@ let currentLinkVisit = null;
 let selectedOrderIds = new Set();
 let selectedOrderOps = new Map();
 let currentCorrectionCandidate = null;
+let duplicateDismissInFlight = false;
 
 function normalizeSuggestedOrderId(value){
   const raw=String(value||'').toUpperCase().replace(/\u0410/g,'A').replace(/[\u2012\u2013\u2014\u2212]/g,'-');
@@ -1777,13 +1778,17 @@ function configureCorrectionPanel(visit){
     panel.style.display='none';form.style.display='none';return;
   }
   const c=currentCorrectionCandidate;
+  const isExistingDuplicate=c.correctionMode==='duplicate_existing_operation';
   const duplicate=Number(c.duplicateUnmatchedCount||0)>1;
-  const blocked=c.correctionMode==='duplicate_existing_operation'||c.canApply===false;
+  const blocked=!isExistingDuplicate&&c.canApply===false;
   panel.style.display='block';
   form.style.display=blocked?'none':'block';
+  document.getElementById('linkCorrectionTitle').textContent=isExistingDuplicate
+    ?'⚠️ Отметить запись как дубль'
+    :'⚠️ Исправление исторической записи';
   let copy='';
-  if(c.correctionMode==='duplicate_existing_operation'){
-    copy=`У заказа ${esc(c.id)} уже есть такая операция. Эта запись похожа на дубль: автоматическая привязка отключена. Запись останется в сверке до ручного разбора.`;
+  if(isExistingDuplicate){
+    copy=`У заказа <strong>${esc(c.id)}</strong>${c.client?' · '+esc(c.client):''} уже есть такая операция. После подтверждения эта запись <strong>сохранится в базе и аудите</strong>, но уйдёт из сверки и не будет участвовать в статистике. Исходная операция заказа не изменится.`;
   }else if(c.correctionMode==='restore_before_link'){
     copy=`Заказ ${esc(c.id)} скрыт. Сначала восстановите его из архива заказов, затем обновите сверку и привяжите выдачу. Данные автоматически не изменяются.`;
   }else if(c.correctionMode==='chronology_conflict'){
@@ -1795,7 +1800,7 @@ function configureCorrectionPanel(visit){
   }else{
     copy=`Заказ <strong>${esc(c.id)}</strong>${c.client?' · '+esc(c.client):''} найден точно, но недоступен для обычной привязки${c.manualHidden?' (он скрыт)':''}. Исправление будет записано в аудит.`;
   }
-  if(duplicate&&!blocked) copy+=` <strong>Найдено несколько визитов с этим номером; остальные не будут изменены.</strong>`;
+  if(duplicate&&!blocked&&!isExistingDuplicate) copy+=` <strong>Найдено несколько визитов с этим номером; остальные не будут изменены.</strong>`;
   document.getElementById('linkCorrectionCopy').innerHTML=copy;
   document.getElementById('linkCorrectionBaseline').style.display=c.correctionMode==='seed_issue_and_link_return'?'block':'none';
   document.getElementById('linkCorrectionIssueDate').value=c.correctionMode==='seed_issue_and_link_return'?(shiftDateToISO(c.issueDate)||''):'';
@@ -1804,22 +1809,33 @@ function configureCorrectionPanel(visit){
   document.getElementById('linkCorrectionReason').value='';
   document.getElementById('linkCorrectionConfirmed').checked=false;
   document.getElementById('linkCorrectionDuplicateConfirmed').checked=false;
-  document.getElementById('linkCorrectionDuplicateRow').style.display=duplicate?'flex':'none';
+  document.getElementById('linkCorrectionConfirmText').textContent=isExistingDuplicate
+    ?'Я проверил, что эта операция уже записана, и подтверждаю: визит нужно отметить как дубль. Запись останется в базе и аудите, но не в статистике.'
+    :'Я сверил номер заказа, дату и операцию и подтверждаю исправление истории.';
+  document.getElementById('linkCorrectionDuplicateRow').style.display=duplicate&&!isExistingDuplicate?'flex':'none';
+  document.getElementById('linkCorrectionBtn').textContent=isExistingDuplicate?'Отметить как дубль':'Исправить историю';
   refreshCorrectionButton();
 }
 
 function refreshCorrectionButton(){
   const btn=document.getElementById('linkCorrectionBtn');
   const c=currentCorrectionCandidate;
-  if(!c||c.canApply===false||c.correctionMode==='duplicate_existing_operation'){btn.disabled=true;return;}
+  const isExistingDuplicate=c&&c.correctionMode==='duplicate_existing_operation';
+  if(!c||(!isExistingDuplicate&&c.canApply===false)){btn.disabled=true;return;}
+  if(isExistingDuplicate&&duplicateDismissInFlight){btn.disabled=true;return;}
   const actor=document.getElementById('linkCorrectionActor').value.trim();
   const reason=document.getElementById('linkCorrectionReason').value.trim();
   const confirmed=document.getElementById('linkCorrectionConfirmed').checked;
-  const needsBaseline=c.correctionMode==='seed_issue_and_link_return';
+  const needsBaseline=!isExistingDuplicate&&c.correctionMode==='seed_issue_and_link_return';
   const baselineOk=!needsBaseline||(document.getElementById('linkCorrectionIssueDate').value&&document.getElementById('linkCorrectionIssueTime').value);
-  const needsDuplicateConfirm=Number(c.duplicateUnmatchedCount||0)>1;
+  const needsDuplicateConfirm=!isExistingDuplicate&&Number(c.duplicateUnmatchedCount||0)>1;
   const duplicateOk=!needsDuplicateConfirm||document.getElementById('linkCorrectionDuplicateConfirmed').checked;
   btn.disabled=!(actor.length>=2&&reason.length>=6&&confirmed&&baselineOk&&duplicateOk);
+}
+
+function confirmCorrectionAction(){
+  if(currentCorrectionCandidate?.correctionMode==='duplicate_existing_operation') return confirmDuplicateVisit();
+  return confirmManagerCorrection();
 }
 
 function selectOrder(id){
@@ -1842,9 +1858,16 @@ function setSelectedOperation(id,op,button){
 }
 
 function closeLinkModal(){
+  if(duplicateDismissInFlight) return;
   document.getElementById('linkModal').style.display='none';
   setLinkModalError('');
   currentLinkVisit=null;currentCorrectionCandidate=null;selectedOrderIds=new Set();selectedOrderOps=new Map();
+}
+
+function setDuplicateModalBusy(busy){
+  duplicateDismissInFlight=busy;
+  document.getElementById('linkCancelBtn').disabled=busy;
+  document.getElementById('linkConfirmBtn').disabled=busy||!selectedOrderIds.size;
 }
 
 async function confirmLink(){
@@ -1921,6 +1944,52 @@ async function confirmManagerCorrection(){
   }catch(e){
     setLinkModalError('Исправление не применено: '+(e.message||e));
     btn.textContent='Исправить историю';
+    refreshCorrectionButton();
+  }
+}
+
+async function confirmDuplicateVisit(){
+  const visit=currentLinkVisit,c=currentCorrectionCandidate;
+  if(duplicateDismissInFlight||!visit||!c||c.correctionMode!=='duplicate_existing_operation') return;
+  refreshCorrectionButton();
+  const btn=document.getElementById('linkCorrectionBtn');
+  if(btn.disabled) return;
+  if(!WHApi.markVisitDuplicate){
+    setLinkModalError('Сервер ещё не поддерживает отметку дублей. Запись не изменена.');
+    return;
+  }
+  const actor=document.getElementById('linkCorrectionActor').value.trim();
+  const reason=document.getElementById('linkCorrectionReason').value.trim();
+  const visitId=visit.visitKey,orderId=c.id;
+  setDuplicateModalBusy(true);
+  setLinkModalError('');
+  btn.textContent='Сохранение...';btn.disabled=true;
+  try{
+    const result=await WHApi.markVisitDuplicate({
+      visitId,
+      orderId,
+      reason,
+      actor,
+      expectedVisitDate:shiftDateToISO(reconciliationVisitDate(visit)),
+      expectedVisitTime:fmtRawTime(visit.time),
+      expectedOperation:normalizeLinkOperation(c.operation)||normalizeLinkOperation(visit.operation),
+      confirmDuplicate:true,
+      originalVisitId:c.originalVisitId||null
+    });
+    if(!result||result.ok!==true||result.excluded!==true){
+      throw new Error(result?.error||'сервер не подтвердил исключение дубля');
+    }
+    localStorage.setItem('wh_correction_actor',actor);
+    setDuplicateModalBusy(false);
+    closeLinkModal();
+    await loadData();
+    await loadUnmatched();
+    document.getElementById('linkContent').insertAdjacentHTML('afterbegin',
+      `<div style="background:rgba(46,204,113,.1);border:1px solid var(--client);border-radius:10px;padding:12px 16px;margin-bottom:14px;font-size:13px;font-weight:600;color:#1a8a4a">✓ Визит по заказу ${esc(orderId)} отмечен как дубль. Запись сохранена в базе и аудите и исключена из сверки и статистики.</div>`);
+  }catch(e){
+    setDuplicateModalBusy(false);
+    setLinkModalError('Дубль не отмечен: '+(e.message||e));
+    btn.textContent='Отметить как дубль';
     refreshCorrectionButton();
   }
 }
