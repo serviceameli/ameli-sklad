@@ -133,9 +133,12 @@ test('reconciliation backend consumes one snapshot and exposes duplicate counts'
   c._sbRpc = (_cfg, name) => {
     calls.push(name);
     return {
-      unmatchedVisits: [{ visitKey: 'v1', shiftDate: '2026-07-15', time: '10:00', orders: [] }],
+      unmatchedVisits: [{ visitKey: 'v1', visitDate: '2026-07-19', shiftDate: '2026-07-15', time: '10:00',
+        suggestedOrderId: '111', suggestionAmbiguous: false, orders: [] }],
       lifecycleViolations: [{ id: '111', issueDate: '2026-07-15', returnDate: '2026-07-17', category: 'duplicate_issue', issueCount: 2, returnCount: 0 }],
-      linkCandidates: [{ id: 'FUTURE', issueDate: '2026-08-01', returnDate: '2026-08-03', orderType: 'issue' }]
+      linkCandidates: [{ id: 'FUTURE', issueDate: '2026-08-01', returnDate: '2026-08-03', orderType: 'issue' }],
+      correctionCandidates: [{ visitKey: 'v1', id: '111', client: 'Клиент', issueDate: '2026-07-15',
+        returnDate: '2026-07-19', operation: 'return', manualHidden: true, correctionMode: 'seed_issue_and_link_return', canApply: true }]
     };
   };
   const result = c._getUnmatched({});
@@ -144,6 +147,89 @@ test('reconciliation backend consumes one snapshot and exposes duplicate counts'
   assert.equal(result.unlistedOrders[0].issueCount, 2);
   assert.equal(result.linkCandidates[0].id, 'FUTURE');
   assert.equal(result.linkCandidates[0].orderType, 'issue');
+  assert.equal(result.unmatchedVisits[0].visitDate, '2026-07-19');
+  assert.equal(result.unmatchedVisits[0].shiftDate, '2026-07-15');
+  assert.equal(result.unmatchedVisits[0].suggestedOrderId, '111');
+  assert.equal(result.unmatchedVisits[0].suggestionAmbiguous, false);
+  assert.equal(result.correctionCandidates[0].visitKey, 'v1');
+  assert.equal(result.correctionCandidates[0].issueDate, '15.07.2026');
+  assert.equal(result.correctionCandidates[0].returnDate, '19.07.2026');
+  assert.equal(result.correctionCandidates[0].correctionMode, 'seed_issue_and_link_return');
+});
+
+test('manager correction sends only the documented payload and returns the RPC result', () => {
+  const c = context();
+  let call;
+  c._sbRpc = (_cfg, name, body) => {
+    call = { name, body };
+    return { ok: true, linked: true, baselineCreated: true, correctionMode: 'seed_issue_and_link_return' };
+  };
+
+  const result = c._applyManagerCorrection({}, {
+    action: 'applyManagerCorrection', dataEpoch: 'ignored-by-helper',
+    visitId: ' visit-1 ', orderId: ' 111 ', reason: ' Проверено ', actor: ' Менеджер ',
+    expectedVisitDate: '19.07.2026', expectedVisitTime: '7:05',
+    baselineIssueDate: '18.07.2026', baselineIssueTime: '09:15', confirmDuplicate: false
+  });
+
+  assert.equal(call.name, 'apply_warehouse_manager_correction');
+  assert.deepEqual(JSON.parse(JSON.stringify(call.body)), { p_payload: {
+    visitId: 'visit-1', orderId: '111', reason: 'Проверено', actor: 'Менеджер',
+    expectedVisitDate: '2026-07-19', expectedVisitTime: '07:05',
+    baselineIssueDate: '2026-07-18', baselineIssueTime: '09:15', confirmDuplicate: false
+  }});
+  assert.equal(result.ok, true);
+  assert.equal(result.baselineCreated, true);
+});
+
+test('manager correction rejects incomplete or invalid optimistic-concurrency data', () => {
+  const c = context();
+  c._sbRpc = () => { throw new Error('RPC must not be called'); };
+  const valid = {
+    visitId: 'v1', orderId: '111', reason: 'Проверено', actor: 'Менеджер',
+    expectedVisitDate: '2026-07-19', expectedVisitTime: '07:05'
+  };
+  assert.throws(() => c._applyManagerCorrection({}, { ...valid, expectedVisitDate: '' }), /expectedVisitDate is required/);
+  assert.throws(() => c._applyManagerCorrection({}, { ...valid, expectedVisitTime: '25:90' }), /Неверное время/);
+  assert.throws(() => c._applyManagerCorrection({}, { ...valid, baselineIssueDate: '2026-07-18' }), /must be provided together/);
+});
+
+test('manager correction preserves a semantic RPC error for the POST response', () => {
+  const output = {};
+  const c = context({
+    PropertiesService: { getScriptProperties: () => ({ getProperty: () => 'configured' }) },
+    ContentService: {
+      MimeType: { JSON: 'json' },
+      createTextOutput(value) {
+        output.value = value;
+        return { setMimeType() { return this; } };
+      }
+    }
+  });
+  c._sbRpc = () => ({ ok: false, error: 'Визит изменился, обновите сверку', retryable: false });
+  c.doPost({ postData: { contents: JSON.stringify({
+    action: 'applyManagerCorrection', dataEpoch: '2026-07-14-full-reset-v1',
+    visitId: 'v1', orderId: '111', reason: 'Проверено', actor: 'Менеджер',
+    expectedVisitDate: '2026-07-19', expectedVisitTime: '07:05'
+  }) } });
+  assert.deepEqual(JSON.parse(output.value), {
+    ok: false, error: 'Визит изменился, обновите сверку', retryable: false
+  });
+
+  c._sbRpc = () => {
+    const error = new Error('RPC apply_warehouse_manager_correction → 409: stale visit');
+    error.retryable = false;
+    throw error;
+  };
+  c.doPost({ postData: { contents: JSON.stringify({
+    action: 'applyManagerCorrection', dataEpoch: '2026-07-14-full-reset-v1',
+    visitId: 'v1', orderId: '111', reason: 'Проверено', actor: 'Менеджер',
+    expectedVisitDate: '2026-07-19', expectedVisitTime: '07:05'
+  }) } });
+  const thrownEnvelope = JSON.parse(output.value);
+  assert.equal(thrownEnvelope.ok, false);
+  assert.equal(thrownEnvelope.retryable, false);
+  assert.match(thrownEnvelope.error, /stale visit/);
 });
 
 test('today return counters ignore a historical return without an issue', () => {

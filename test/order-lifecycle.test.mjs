@@ -352,6 +352,41 @@ test('client API rejects a server error envelope', async () => {
   await assert.rejects(context.window.WHApi.getData(), /database failed/);
 });
 
+test('client API sends a manager correction through the guarded Apps Script action', async () => {
+  let posted;
+  const context = {
+    window: {}, SUPABASE_URL: 'https://example.test', SUPABASE_KEY: 'key', SYNC_URL: 'https://script.test',
+    Set, Date, Promise, URLSearchParams, encodeURIComponent,
+    fetch: async (_url, options) => {
+      posted = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ ok: true, data: { linked: true } }) };
+    }
+  };
+  context.window.supabase = { createClient: () => ({ from: () => ({}) }) };
+  vm.createContext(context);
+  vm.runInContext(read('api.js'), context);
+
+  const result = await context.window.WHApi.applyManagerCorrection({
+    visitId: 'visit-1', orderId: '26-A-002053', reason: 'Проверено по журналу', actor: 'Менеджер',
+    expectedVisitDate: '2026-07-19', expectedVisitTime: '07:24',
+    baselineIssueDate: '2026-07-18', baselineIssueTime: '09:00', confirmDuplicate: true
+  });
+
+  assert.equal(result.linked, true);
+  assert.equal(posted.action, 'applyManagerCorrection');
+  assert.equal(posted.dataEpoch, '2026-07-14-full-reset-v1');
+  assert.equal(posted.orderId, '26-A-002053');
+  assert.equal(posted.confirmDuplicate, true);
+});
+
+test('both warehouse pages cache-bust the reconciliation API release', () => {
+  for (const file of ['warehouse-staff.html', 'warehouse-dashboard.html']) {
+    const html = read(file);
+    assert.match(html, /config\.js\?v=20260722-reconciliation1/);
+    assert.match(html, /api\.js\?v=20260722-reconciliation1/);
+  }
+});
+
 test('schema provides atomic idempotency and per-order operations', () => {
   const sql = read('supabase/migrations/202607130001_order_lifecycle.sql');
   assert.match(sql, /visits_client_event_id_uidx/);
@@ -1184,4 +1219,89 @@ test('an ambiguous order stays read-only for every reconciliation visit', () => 
   assert.doesNotMatch(element('linkModalOrders').innerHTML, /AMB/);
   context.openLinkModal('original');
   assert.doesNotMatch(element('linkModalOrders').innerHTML, /AMB/);
+});
+
+test('reconciliation cards prefer the visit date over a long shift start date', () => {
+  const { context, element } = frontendContext('warehouse-dashboard.html', { Chart: class { destroy() {} } });
+  vm.runInContext(`unmatchedData={
+    unmatchedVisits:[{visitKey:'late',visitDate:'2026-07-19',shiftDate:'2026-07-16',time:'07:24',worker:'Склад',visitor:'client',operation:'return',orders:[]}],
+    unlistedOrders:[],linkCandidates:[],correctionCandidates:[]
+  };unmatchedLoadError=null;`, context);
+  context.renderLinkTab();
+  assert.match(element('linkContent').innerHTML, /19 июл/);
+  assert.doesNotMatch(element('linkContent').innerHTML, /16 июл/);
+});
+
+test('reconciliation extracts an order hint and puts its exact candidate first', () => {
+  const { context, element } = frontendContext('warehouse-dashboard.html', { Chart: class { destroy() {} } });
+  vm.runInContext(`unmatchedData={
+    unmatchedVisits:[{visitKey:'hint',visitDate:'2026-07-19',shiftDate:'2026-07-16',time:'07:24',worker:'Склад',operation:'return',comment:'Оксана 26-а-002053',orders:[]}],
+    unlistedOrders:[],correctionCandidates:[],linkCandidates:[
+      {id:'26-A-009999',client:'Другой',returnDate:'19.07.2026',orderType:'return'},
+      {id:'26-A-002053',client:'Оксана',returnDate:'19.07.2026',orderType:'return'}
+    ]
+  };`, context);
+  context.openLinkModal('hint');
+  const html=element('linkModalOrders').innerHTML;
+  assert.ok(html.indexOf('26-A-002053') < html.indexOf('26-A-009999'));
+  assert.match(html, /exact-order/);
+  assert.match(element('linkModalSuggestion').innerHTML, /26-A-002053/);
+});
+
+test('an existing-operation duplicate cannot be corrected automatically', async () => {
+  let calls=0;
+  const { context, element } = frontendContext('warehouse-dashboard.html', { Chart: class { destroy() {} }, WHApi: {
+    applyManagerCorrection: async () => { calls++; return { success: true }; }
+  } });
+  vm.runInContext(`unmatchedData={
+    unmatchedVisits:[{visitKey:'dup',visitDate:'2026-07-19',time:'06:56',worker:'Склад',operation:'return',suggestedOrderId:'26-A-001944',orders:[]}],
+    unlistedOrders:[],linkCandidates:[],correctionCandidates:[{
+      visitKey:'dup',id:'26-A-001944 (F)',client:'Клиент',operation:'return',issueCount:1,returnCount:1,
+      duplicateUnmatchedCount:1,correctionMode:'duplicate_existing_operation',canApply:false
+    }]
+  };`, context);
+  context.openLinkModal('dup');
+  assert.equal(element('linkCorrectionPanel').style.display, 'block');
+  assert.equal(element('linkCorrectionForm').style.display, 'none');
+  assert.match(element('linkCorrectionCopy').innerHTML, /дубль/);
+  await context.confirmManagerCorrection();
+  assert.equal(calls, 0);
+});
+
+test('a hidden issue must be restored before it can be linked', () => {
+  const { context, element } = frontendContext('warehouse-dashboard.html', { Chart: class { destroy() {} } });
+  vm.runInContext(`unmatchedData={
+    unmatchedVisits:[{visitKey:'hidden-issue',visitDate:'2026-07-19',time:'08:00',worker:'Склад',operation:'issue',suggestedOrderId:'26-A-002062',orders:[]}],
+    unlistedOrders:[],linkCandidates:[],correctionCandidates:[{
+      visitKey:'hidden-issue',id:'26-A-002062',client:'Клиент',operation:'issue',manualHidden:true,
+      correctionMode:'restore_before_link',canApply:false
+    }]
+  };`, context);
+  context.openLinkModal('hidden-issue');
+  assert.equal(element('linkCorrectionForm').style.display, 'none');
+  assert.match(element('linkCorrectionCopy').innerHTML, /восстановите его из архива/);
+});
+
+test('manager correction keeps the modal open and displays a server error', async () => {
+  const { context, element } = frontendContext('warehouse-dashboard.html', { Chart: class { destroy() {} }, WHApi: {
+    applyManagerCorrection: async () => { throw new Error('history changed'); }
+  } });
+  vm.runInContext(`unmatchedData={
+    unmatchedVisits:[{visitKey:'restore',visitDate:'2026-07-19',shiftDate:'2026-07-16',time:'06:53',worker:'Склад',operation:'return',suggestedOrderId:'26-A-001800',orders:[]}],
+    unlistedOrders:[],linkCandidates:[],correctionCandidates:[{
+      visitKey:'restore',id:'26-A-001800',client:'Клиент',issueDate:'18.07.2026',returnDate:'19.07.2026',operation:'return',
+      manualHidden:true,issueCount:0,returnCount:0,duplicateUnmatchedCount:1,correctionMode:'seed_issue_and_link_return',canApply:true
+    }]
+  };`, context);
+  context.openLinkModal('restore');
+  element('linkCorrectionActor').value='Менеджер';
+  element('linkCorrectionReason').value='Возврат был записан после очистки истории';
+  element('linkCorrectionIssueTime').value='10:00';
+  element('linkCorrectionConfirmed').checked=true;
+  context.refreshCorrectionButton();
+  assert.equal(element('linkCorrectionBtn').disabled, false);
+  await context.confirmManagerCorrection();
+  assert.equal(element('linkModal').style.display, 'flex');
+  assert.equal(element('linkModalError').style.display, 'block');
+  assert.match(element('linkModalError').textContent, /history changed/);
 });
