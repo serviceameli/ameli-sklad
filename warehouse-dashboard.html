@@ -541,7 +541,7 @@ table.dt tbody tr:last-child td{border-bottom:none}
     <div id="linkCorrectionPanel" class="correction-panel">
       <div class="correction-title">⚠️ Исправление исторической записи</div>
       <div id="linkCorrectionCopy" class="correction-copy"></div>
-      <div id="linkCorrectionForm">
+      <div id="linkCorrectionForm" oninput="refreshCorrectionButton()" onchange="refreshCorrectionButton()">
         <label class="correction-field">
           <span>Кто вносит исправление</span>
           <input id="linkCorrectionActor" maxlength="80" autocomplete="name" placeholder="Имя и фамилия менеджера" oninput="refreshCorrectionButton()">
@@ -553,8 +553,8 @@ table.dt tbody tr:last-child td{border-bottom:none}
           </div>
         </div>
         <label class="correction-field">
-          <span>Причина исправления</span>
-          <textarea id="linkCorrectionReason" maxlength="500" placeholder="Например: возврат записали как «нет в списке» после очистки истории" oninput="refreshCorrectionButton()"></textarea>
+          <span>Причина исправления — минимум 6 символов</span>
+          <textarea id="linkCorrectionReason" minlength="6" maxlength="500" placeholder="Например: ошибка" oninput="refreshCorrectionButton()"></textarea>
         </label>
         <label class="correction-check">
           <input id="linkCorrectionConfirmed" type="checkbox" onchange="refreshCorrectionButton()">
@@ -1819,7 +1819,7 @@ function refreshCorrectionButton(){
   const baselineOk=!needsBaseline||(document.getElementById('linkCorrectionIssueDate').value&&document.getElementById('linkCorrectionIssueTime').value);
   const needsDuplicateConfirm=Number(c.duplicateUnmatchedCount||0)>1;
   const duplicateOk=!needsDuplicateConfirm||document.getElementById('linkCorrectionDuplicateConfirmed').checked;
-  btn.disabled=!(actor.length>=2&&reason.length>=10&&confirmed&&baselineOk&&duplicateOk);
+  btn.disabled=!(actor.length>=2&&reason.length>=6&&confirmed&&baselineOk&&duplicateOk);
 }
 
 function selectOrder(id){
